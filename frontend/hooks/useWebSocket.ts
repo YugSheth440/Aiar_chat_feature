@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { BACKEND_WS_URL } from '../src/config';
 import { useSceneStore } from '../store/sceneStore';
 import { useWorkflowStore } from '../store/workflowStore';
+import { useUiStore } from '../store/uiStore';
 import { validateSceneAnalysis } from '../src/validators';
 
 export function useWebSocket() {
@@ -39,6 +40,9 @@ export function useWebSocket() {
 
         // Pass validated data to UI state
         setSceneAnalysis(data, currentBbox.current || []);
+        
+        // Open the bottom sheet so the user can see the solutions!
+        useUiStore.getState().setSheetPosition('half');
       } catch (err) {
         console.error('[WS] Error parsing message:', err);
         resetScene();
