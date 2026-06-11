@@ -30,7 +30,18 @@ const COCO_LABELS = [
   'teddy bear','hair drier','toothbrush',
 ];
 
-// Base64 encoding on JS thread (removed as we now use takePictureAsync for real JPEGs)
+// ─── Base64 encoding on JS thread ─────────────────────────────────────────
+// vision-camera-resize-plugin v3.x returns Uint8Array — not a string.
+// btoa() is not available in the worklet context (Hermes JSI).
+// We bridge to the JS thread via runOnJS and encode there.
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 // ─── Component ────────────────────────────────────────────────────────────
 export function CameraView() {
@@ -68,32 +79,14 @@ export function CameraView() {
 
   // ── Step 2e: UI state update — separate from network layer
   const onStableDetection = useCallback(
-    async (hazardBbox: number[]) => {
-      if (!cameraRef) return;
-      
-      // Step 2e: UI state transition
+    (rawBytes: Uint8Array, hazardBbox: number[]) => {
+      // Convert bytes → base64 on JS thread
+      const base64 = uint8ToBase64(rawBytes);
       markAnalysisSent();
+      sendSceneFrame(base64, hazardBbox);
       startAnalysis();
-      
-      try {
-        // Fix #7: Capture a real JPEG (fixes Uvicorn 1MB crash and Groq 400 error)
-        const photo = await cameraRef.takePictureAsync({
-          base64: true,
-          quality: 0.5,
-          skipMetadata: true,
-        });
-        
-        if (photo.base64) {
-          sendSceneFrame(photo.base64, hazardBbox);
-        } else {
-          resetScene();
-        }
-      } catch (err) {
-        console.error("Failed to take picture for analysis", err);
-        resetScene();
-      }
     },
-    [cameraRef, markAnalysisSent, sendSceneFrame, startAnalysis, resetScene]
+    [markAnalysisSent, sendSceneFrame, startAnalysis]
   );
 
   // ── Shared worklet state (persists between frames via useSharedValue)
@@ -173,8 +166,16 @@ export function CameraView() {
             lastSentAt.value = now;
             stableCount.value = { ...stableCount.value, [id]: 0 };
 
-            // ── Sub-task 2c: Trigger JS thread to capture full frame ─
-            runOnJS(onStableDetection)(bbox);
+            // ── Sub-task 2c: Real frame capture (640×640 for VLM context) ─
+            // Separate resize for full-scene context — higher res for Groq
+            const fullFrameBytes = resize(frame, {
+              scale: { width: 640, height: 640 },
+              pixelFormat: 'rgb',
+              dataType: 'uint8',
+            });
+
+            // Bridge bytes to JS thread for btoa encoding
+            runOnJS(onStableDetection)(fullFrameBytes, bbox);
 
             // Only send the first stable detection per cooldown window
             break;
@@ -211,7 +212,6 @@ export function CameraView() {
       style={StyleSheet.absoluteFill}
       device={device}
       isActive={true}
-      photo={true}
       frameProcessor={frameProcessor}
       torch={torchEnabled ? 'on' : 'off'}
       enableFpsGraph={__DEV__}
