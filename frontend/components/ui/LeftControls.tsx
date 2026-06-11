@@ -149,11 +149,12 @@ function ScanBtn() {
     btnScale.value = withSequence(withTiming(0.88, { duration: 90 }), withSpring(1, { damping: 10 }));
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // Reset both stores so CameraView's frame processor can fire again.
+    // Force the CameraView worklet to capture and send the frame to the backend
     // The actual detection + WebSocket send happens automatically in CameraView
-    // once a stable object is framed for 30 consecutive frames.
+    // but this bypasses the tracking wait.
     resetScene();
     resetWorkflow();
+    useWorkflowStore.getState().triggerManualScan();
   };
 
   return (

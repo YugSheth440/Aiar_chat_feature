@@ -12,6 +12,7 @@ export type FacingMode = 'back' | 'front';
 
 interface WorkflowStore {
   workflowState: WorkflowState;
+  manualScanTick: number;
   detectedHazards: Hazard[];
   selectedHazard: Hazard | null;
   completedStepIds: Set<string>;
@@ -27,6 +28,7 @@ interface WorkflowStore {
 
   // Actions
   setCameraRef: (ref: any | null) => void;
+  triggerManualScan: () => void;
   startAnalysis: () => void;
   onHazardsDiscovered: (hazards: Hazard[]) => void;
   focusHazard: (hazard: Hazard) => void;
@@ -41,6 +43,7 @@ interface WorkflowStore {
 
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   workflowState: 'READY',
+  manualScanTick: 0,
   detectedHazards: [],
   selectedHazard: null,
   completedStepIds: new Set(),
@@ -51,6 +54,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   sheetSnapIndex: -1,
 
   setCameraRef: (cameraRef) => set({ cameraRef }),
+  triggerManualScan: () => set((state) => ({ manualScanTick: state.manualScanTick + 1 })),
 
   // ── Always starts immediately on ONE tap regardless of current state ──
   startAnalysis: () =>

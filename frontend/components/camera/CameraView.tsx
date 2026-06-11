@@ -61,6 +61,18 @@ export function CameraView() {
   // ── Fix #3: resize plugin instance (worklet-safe, memory managed)
   const { resize } = useResizePlugin();
 
+  const [manualScanTrigger, setManualScanTrigger] = React.useState(0);
+  
+  // Sync manual trigger from store
+  useEffect(() => {
+    const unsub = useWorkflowStore.subscribe((state) => {
+      if (state.manualScanTick > manualScanTrigger) {
+        setManualScanTrigger(state.manualScanTick);
+      }
+    });
+    return unsub;
+  }, [manualScanTrigger]);
+
   // ── Permission request on mount
   useEffect(() => {
     if (!hasPermission) requestPermission();
@@ -80,8 +92,11 @@ export function CameraView() {
   // ── Step 2e: UI state update — separate from network layer
   const onStableDetection = useCallback(
     (rawBytes: Uint8Array, hazardBbox: number[]) => {
+      console.log(`[FixSight] onStableDetection triggered! Received ${rawBytes.byteLength} bytes.`);
       // Convert bytes → base64 on JS thread
       const base64 = uint8ToBase64(rawBytes);
+      console.log(`[FixSight] Encoded to base64 length: ${base64.length}`);
+      
       markAnalysisSent();
       sendSceneFrame(base64, hazardBbox);
       startAnalysis();
@@ -95,6 +110,11 @@ export function CameraView() {
   const lastSeenFrame = useSharedValue<Record<string, number>>({});
   const lastSentAt    = useSharedValue(0);
   const frameCount    = useSharedValue(0);
+  const manualTriggerSV = useSharedValue(0);
+  useEffect(() => {
+    manualTriggerSV.value = manualScanTrigger;
+  }, [manualScanTrigger, manualTriggerSV]);
+
   // Fix #6: ID counter owned by JS-side shared value, not module scope
   const nextIdCounter = useSharedValue(1);
 
@@ -162,12 +182,16 @@ export function CameraView() {
           stableCount.value = { ...stableCount.value, [id]: count };
 
           const now = Date.now();
-          if (count >= THRESHOLD && (now - lastSentAt.value) > SEND_COOLDOWN) {
+          const isManual = manualTriggerSV.value > 0;
+          
+          if (isManual || (count >= THRESHOLD && (now - lastSentAt.value) > SEND_COOLDOWN)) {
+            if (isManual) {
+              manualTriggerSV.value = 0; // reset
+            }
             lastSentAt.value = now;
             stableCount.value = { ...stableCount.value, [id]: 0 };
 
             // ── Sub-task 2c: Real frame capture (320x320 for VLM context) ─
-            // 320x320 is ~300KB raw RGB, perfectly balanced for the bridge and Groq
             const fullFrameBytes = resize(frame, {
               scale: { width: 320, height: 320 },
               pixelFormat: 'rgb',
