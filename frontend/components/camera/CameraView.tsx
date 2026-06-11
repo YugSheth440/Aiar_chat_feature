@@ -155,6 +155,25 @@ export function CameraView() {
         const scores    = outputs[2] as Float32Array;
         const numDets   = Math.round((outputs[3] as Float32Array)[0]);
 
+        const isManual = manualTriggerSV.value > 0;
+        
+        // ── MANUAL OVERRIDE (works even if 0 objects are detected) ──
+        if (isManual) {
+            manualTriggerSV.value = 0; // reset
+            lastSentAt.value = Date.now();
+            
+            // Capture full frame
+            const fullFrameBytes = resize(frame, {
+              scale: { width: 320, height: 320 },
+              pixelFormat: 'rgb',
+              dataType: 'uint8',
+            });
+            // Send empty bbox since it was a manual scan
+            runOnJS(onStableDetection)(fullFrameBytes, []);
+            return;
+        }
+
+        // ── AUTO TRACKING ──
         for (let i = 0; i < numDets; i++) {
           const score = scores[i];
           if (score < 0.45) continue; // Skip low-confidence detections
@@ -174,20 +193,14 @@ export function CameraView() {
             frameCount.value,
             nextIdCounter.value
           );
-          // Fix #6: persist counter back into shared value
           nextIdCounter.value = newCounter;
 
           const count = (stableCount.value[id] ?? 0) + 1;
-          // Correct spread syntax (fix from plan rev2)
           stableCount.value = { ...stableCount.value, [id]: count };
 
           const now = Date.now();
-          const isManual = manualTriggerSV.value > 0;
           
-          if (isManual || (count >= THRESHOLD && (now - lastSentAt.value) > SEND_COOLDOWN)) {
-            if (isManual) {
-              manualTriggerSV.value = 0; // reset
-            }
+          if (count >= THRESHOLD && (now - lastSentAt.value) > SEND_COOLDOWN) {
             lastSentAt.value = now;
             stableCount.value = { ...stableCount.value, [id]: 0 };
 
