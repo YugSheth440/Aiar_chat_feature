@@ -1,33 +1,40 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { CameraView } from '../../components/camera/CameraView';
 import { AROverlay } from '../../components/ar/AROverlay';
 import { StatusCapsule } from '../../components/capsule/StatusCapsule';
 import { LeftControls } from '../../components/ui/LeftControls';
-import { HazardSelectorBar } from '../../components/sheet/HazardSelectorBar';
-import { HazardSheet } from '../../components/sheet/HazardSheet';
+import { BottomSheet } from '../../components/sheet/BottomSheet';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 /**
  * CameraScreen — FixSight main screen.
  *
  * Layer order (bottom → top):
- *  1. Full-screen camera feed
- *  2. AR overlay (scan line, bounding boxes, temp badges, labels)
+ *  1. Full-screen camera feed (CameraView — runs frame processor)
+ *  2. AR overlay (scan line, Skia bounding boxes)
  *  3. Status capsule (top-center pill)
- *  4. Left action rail (camera flip, flash, rotate, scan)
- *  5. Hazard selector pills (bottom, appears after scan)
- *  6. Hazard sheet (bottom panel / right panel in landscape)
+ *  4. Left action rail (camera flip, flash, rotate, scan/reset)
+ *  5. Bottom Sheet (guidance steps from Groq scene analysis)
+ *
+ * useWebSocket is mounted here at the root so the connection is established
+ * immediately on app open, before the first scan is triggered.
  */
 export default function CameraScreen() {
+  // Establish WebSocket connection on mount so it's ready when first frame fires.
+  useWebSocket();
+
   return (
-    <View style={styles.container}>
-      <CameraView />
-      <AROverlay />
-      <StatusCapsule />
-      <LeftControls />
-      <HazardSelectorBar />
-      <HazardSheet />
-    </View>
+    <GestureHandlerRootView style={styles.container}>
+      <View style={styles.container}>
+        <CameraView />
+        <AROverlay />
+        <StatusCapsule />
+        <LeftControls />
+        <BottomSheet />
+      </View>
+    </GestureHandlerRootView>
   );
 }
 

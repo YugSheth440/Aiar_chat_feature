@@ -30,7 +30,7 @@ export interface ActionStep {
 export interface SpatialTarget {
   id: string;
   label: string;
-  type: 'threat_multiplier' | 'mitigation_tool' | 'neutral_context';
+  type: 'primary_hazard' | 'threat_multiplier' | 'mitigation_tool' | 'neutral_context';
   box_2d: [number, number, number, number]; // normalized [x1, y1, x2, y2]
   guidance: string;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, useWindowDimensions } from 'react-native';
-import { Canvas, RoundedRect, Line, Paint, useFont, DashPathEffect, Text as SkiaText } from '@shopify/react-native-skia';
+import { Canvas, RoundedRect, Line, Paint, DashPathEffect } from '@shopify/react-native-skia';
 import Animated, {
   useSharedValue,
   withTiming,
