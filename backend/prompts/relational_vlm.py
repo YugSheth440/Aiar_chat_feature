@@ -37,7 +37,7 @@ OUTPUT SCHEMA
     {
       "id": "tgt_0",
       "hazard_ref":    "<id of parent hazard from hazards[]>",
-      "label":         "<object name>",
+      "label":         "<object name, STRICTLY 1 or 2 words max>",
       "type":          "<primary_hazard|threat_multiplier|mitigation_tool|neutral_context>",
       "box_2d":        [x1, y1, x2, y2],
       "risk_level":    "<CRITICAL|HIGH|MEDIUM|LOW>",
@@ -59,6 +59,7 @@ FIELD RULES
 - hazards[]: sorted descending by risk severity (CRITICAL first)
 - hazards[].id: sequential "haz_0", "haz_1", …
 - spatial_targets[].id: sequential "tgt_0", "tgt_1", …
+- spatial_targets[].label: MUST be a very concise descriptor of exactly 1 or 2 words (e.g. "Power Outlet", "Exposed Wire", "Fire Extinguisher").
 - spatial_targets[].hazard_ref: MUST match an id in hazards[]
 - spatial_targets[].step_reference: MUST match a step id in the parent hazard's guidance.actions, or null
 - depth_hint: estimate closeness from apparent size and vertical position in frame; 1.0 = very close

@@ -1,18 +1,14 @@
-import React, { useEffect } from 'react';
-import { Text, matchFont, Group, RoundedRect, Line } from '@shopify/react-native-skia';
-import { Platform } from 'react-native';
-import {
+import React, { useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import { Group, Line } from '@shopify/react-native-skia';
+import Animated, {
   SharedValue,
   useDerivedValue,
   useSharedValue,
+  useAnimatedStyle,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-
-const fontStyle = {
-  fontSize: 12,
-  fontWeight: 'bold' as const,
-};
 
 interface Props {
   cx: SharedValue<number>;
@@ -27,14 +23,12 @@ interface Props {
 
 const STRIPE_W  = 3;
 const PAD_H     = 10;
-const PAD_V     = 5;
 const H         = 24;
 const CONNECTOR_GAP = 12; // px between ring top and label bottom
 
-export function ARLabel({ cx, cy, ringR, label, opacity, color, isCompact, mounted }: Props) {
-  const font = matchFont(fontStyle);
-
-  // Entrance animation: slide up + fade
+// ─── Skia connector line component (rendered inside Skia Canvas) ─────────────
+export function ARLabel({ cx, cy, ringR, opacity, color, isCompact, mounted }: Props) {
+  // Entrance animation: slide up + fade matching the label container
   const enterOffset  = useSharedValue(10);
   const enterOpacity = useSharedValue(0);
 
@@ -48,43 +42,19 @@ export function ARLabel({ cx, cy, ringR, label, opacity, color, isCompact, mount
     }
   }, [mounted, isCompact]);
 
-  // Label metrics
-  const labelW = Math.max(label.length * 7.5 + PAD_H * 2 + STRIPE_W + 6, 70);
-
   // Positions derived from ring center + radius
-  const bgX     = useDerivedValue(() => cx.value - labelW / 2);
-  const bgY     = useDerivedValue(() => cy.value - ringR.value - CONNECTOR_GAP - H + enterOffset.value);
-  const stripeX = useDerivedValue(() => bgX.value);
-  const stripeY = useDerivedValue(() => bgY.value);
-  const textX   = useDerivedValue(() => bgX.value + STRIPE_W + PAD_H);
-  const textY   = useDerivedValue(() => bgY.value + H - PAD_V);
+  const bgY = useDerivedValue(() => cy.value - ringR.value - CONNECTOR_GAP - H + enterOffset.value);
 
   // Connector line endpoints
   const p1 = useDerivedValue(() => ({ x: cx.value, y: bgY.value + H + 1 }));
   const p2 = useDerivedValue(() => ({ x: cx.value, y: cy.value - ringR.value - 2 }));
 
-  // Combine parent opacity with entrance opacity
   const combinedOp = useDerivedValue(() => opacity.value * enterOpacity.value);
 
-  if (!font || isCompact) return null;
+  if (isCompact) return null;
 
   return (
     <Group opacity={combinedOp}>
-      {/* Dark glass background */}
-      <RoundedRect x={bgX} y={bgY} width={labelW} height={H} r={6} color="rgba(8,10,20,0.92)" />
-
-      {/* Subtle border */}
-      <RoundedRect
-        x={bgX} y={bgY} width={labelW} height={H} r={6}
-        color="rgba(255,255,255,0.1)" style="stroke" strokeWidth={0.8}
-      />
-
-      {/* Left ankle-tag color stripe */}
-      <RoundedRect x={stripeX} y={stripeY} width={STRIPE_W} height={H} r={3} color={color} />
-
-      {/* Label text */}
-      <Text x={textX} y={textY} text={label} font={font} color="rgba(255,255,255,0.95)" />
-
       {/* Thin connector from label → ring */}
       <Line
         p1={p1}
@@ -96,3 +66,81 @@ export function ARLabel({ cx, cy, ringR, label, opacity, color, isCompact, mount
     </Group>
   );
 }
+
+// ─── React Native overlay component (rendered outside Skia Canvas) ───────────
+export function ARLabelNative({ cx, cy, ringR, label, opacity, color, isCompact, mounted }: Props) {
+  // Entrance animation: slide up + fade matching Skia line
+  const enterOffset  = useSharedValue(10);
+  const enterOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (mounted && !isCompact) {
+      enterOffset.value  = withSpring(0, { damping: 18, stiffness: 300 });
+      enterOpacity.value = withTiming(1, { duration: 320 });
+    } else {
+      enterOffset.value  = 10;
+      enterOpacity.value = 0;
+    }
+  }, [mounted, isCompact]);
+
+  // Truncate label to maximum of 2 words for clean display (with safety fallback)
+  const formattedLabel = useMemo(() => {
+    const safeLabel = label || '';
+    const words = safeLabel.split(/\s+/).filter(Boolean);
+    return words.slice(0, 2).join(' ');
+  }, [label]);
+
+  // Dynamically calculate background container width based on word length
+  const labelW = useMemo(() => {
+    return Math.max(formattedLabel.length * 7.5 + PAD_H * 2 + STRIPE_W + 6, 70);
+  }, [formattedLabel]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const x = cx.value - labelW / 2;
+    const y = cy.value - ringR.value - CONNECTOR_GAP - H + enterOffset.value;
+    return {
+      left: x,
+      top: y,
+      width: labelW,
+      height: H,
+      opacity: opacity.value * enterOpacity.value,
+    };
+  });
+
+  if (isCompact) return null;
+
+  return (
+    <Animated.View style={[styles.labelContainer, animatedStyle]} pointerEvents="none">
+      {/* Left indicator stripe */}
+      <View style={[styles.stripe, { backgroundColor: color }]} />
+      {/* Platform Native text renderer (guaranteed to show correctly) */}
+      <Text style={styles.labelText}>{formattedLabel}</Text>
+    </Animated.View>
+  );
+}
+
+const styles = StyleSheet.create({
+  labelContainer: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(8,10,20,0.92)',
+    borderRadius: 6,
+    borderWidth: 0.8,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 8,
+    gap: 6,
+    zIndex: 100,
+    justifyContent: 'flex-start',
+  },
+  stripe: {
+    width: 3,
+    height: '65%',
+    borderRadius: 3,
+  },
+  labelText: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+});

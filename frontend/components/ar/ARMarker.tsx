@@ -12,15 +12,15 @@ import { ARRing } from './ARRing';
 import { ARLabel } from './ARLabel';
 
 // ─── Type-to-color map (SRS §17 + iOS color palette) ──────────────────────
-const TYPE_COLOR: Record<string, string> = {
-  primary_hazard:    '#FF3B30', // iOS red
-  threat_multiplier: '#FF9F0A', // iOS orange
-  mitigation_tool:   '#30D158', // iOS green
-  neutral_context:   'rgba(255,255,255,0.35)',
+export const TYPE_COLOR: Record<string, string> = {
+  primary_hazard:    '#FF3B30', // iOS red (Hazards)
+  threat_multiplier: '#30D158', // iOS green (Other objects)
+  mitigation_tool:   '#30D158', // iOS green (Other objects)
+  neutral_context:   '#30D158', // iOS green (Other objects)
 };
 
 // ─── Opacity rules per disclosure level ────────────────────────────────────
-function resolveOpacity(
+export function resolveOpacity(
   target: TrackedTarget,
   level: ARDisclosureLevel,
   spotlightTargetId: string | null,
@@ -28,31 +28,9 @@ function resolveOpacity(
   chatFocusTargetId: string | null,
 ): number {
   if (target.isLost) return 0;
-
-  switch (level) {
-    case 'DETECTION':
-      // L1: show only primary_hazard targets at 85%, hide all others
-      return target.type === 'primary_hazard' ? 0.85 : 0;
-
-    case 'HAZARD_FOCUS':
-      // L2: selected hazard + spotlight mitigation at full; others dim
-      if (target.id === spotlightTargetId || target.type === 'primary_hazard') return 1.0;
-      return 0.15;
-
-    case 'STEP_GUIDANCE':
-      // L3: current step target + hazard marker; everything else to 10%
-      if (target.step_reference === activeStepId) return 1.0;
-      if (target.type === 'primary_hazard') return 0.85;
-      return 0.10;
-
-    case 'CHAT_FOCUS':
-      // L4: only chatFocusTargetId at full; all else dim
-      if (target.id === chatFocusTargetId) return 1.0;
-      return 0.10;
-
-    default:
-      return 0.85;
-  }
+  
+  // Return same high opacity for all active markers to prevent dimming/blurring
+  return 0.85;
 }
 
 // ─── Props ─────────────────────────────────────────────────────────────────

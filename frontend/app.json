@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "FixSight needs camera access to detect hazards."
+        "NSCameraUsageDescription": "FixSight needs camera access to detect hazards.",
+        "NSMicrophoneUsageDescription": "FixSight needs microphone access to transcribe voice messages into text."
       }
     },
     "android": {
@@ -23,7 +24,8 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.chirag_jain.fixsighttemp"
     },
@@ -36,6 +38,12 @@
         {
           "cameraPermissionText": "FixSight needs camera access to detect hazards.",
           "enableFrameProcessors": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "FixSight needs microphone access to transcribe voice messages into text."
         }
       ],
       "react-native-fast-tflite",

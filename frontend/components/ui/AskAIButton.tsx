@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -19,12 +20,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-import { MessageCircle, Send, X } from 'lucide-react-native';
+import { MessageCircle, Send, X, Mic } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets } from 'expo-audio';
 import { useChatStore } from '../../store/chatStore';
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useARTrackingStore } from '../../store/arTrackingStore';
 import { ChatBubble } from './ChatBubble';
+import { BACKEND_URL } from '../../src/config';
 
 /**
  * AskAIButton — on-demand chat entry point (Phase 5).
@@ -47,6 +50,85 @@ export function AskAIButton() {
 
   const [inputText, setInputText] = useState('');
   const inputRef = useRef<TextInput>(null);
+
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder);
+
+  const handleMicPress = async () => {
+    if (isTranscribing) return;
+
+    if (!recorderState.isRecording) {
+      try {
+        const permission = await AudioModule.getRecordingPermissionsAsync();
+        if (!permission.granted) {
+          const request = await AudioModule.requestRecordingPermissionsAsync();
+          if (!request.granted) {
+            alert('Microphone permission is required to record audio.');
+            return;
+          }
+        }
+
+        await AudioModule.setAudioModeAsync({
+          playsInSilentMode: true,
+          allowsRecording: true,
+        });
+
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await audioRecorder.prepareToRecordAsync();
+        await audioRecorder.record();
+      } catch (err) {
+        console.error('Failed to start recording:', err);
+      }
+    } else {
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await audioRecorder.stop();
+        
+        const uri = audioRecorder.uri;
+        if (!uri) {
+          console.error('No recording URI found');
+          return;
+        }
+
+        setIsTranscribing(true);
+
+        const formData = new FormData();
+        formData.append('file', {
+          uri: uri,
+          name: 'audio.m4a',
+          type: 'audio/m4a',
+        } as any);
+
+        const response = await fetch(`${BACKEND_URL}/transcribe`, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned status ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.text) {
+          setInputText((prev) => {
+            const trimmed = prev.trim();
+            return trimmed ? `${trimmed} ${data.text}` : data.text;
+          });
+        } else if (data.error) {
+          console.error('Transcription error from backend:', data.error);
+        }
+      } catch (err) {
+        console.error('Failed to stop or transcribe recording:', err);
+      } finally {
+        setIsTranscribing(false);
+      }
+    }
+  };
 
   // Don't show during analysis — focus on the main safety workflow
   if (workflowState === 'ANALYZING' || workflowState === 'READY') return null;
@@ -85,8 +167,7 @@ export function AskAIButton() {
         const b64 = (reader.result as string).split(',')[1];
         
         try {
-          const WS_URL = process.env.EXPO_PUBLIC_WS_URL || 'ws://192.168.0.15:8000/ws';
-          const HTTP_URL = WS_URL.replace('ws://', 'http://').replace('/ws', '/chat');
+          const HTTP_URL = `${BACKEND_URL}/chat`;
           
           const res = await fetch(HTTP_URL, {
             method: 'POST',
@@ -170,7 +251,13 @@ export function AskAIButton() {
           <TextInput
             ref={inputRef}
             style={styles.textInput}
-            placeholder="What is this? Is it safe?"
+            placeholder={
+              isTranscribing
+                ? "Transcribing audio..."
+                : recorderState.isRecording
+                ? "Listening..."
+                : "What is this? Is it safe?"
+            }
             placeholderTextColor="rgba(255,255,255,0.3)"
             value={inputText}
             onChangeText={setInputText}
@@ -178,14 +265,33 @@ export function AskAIButton() {
             returnKeyType="send"
             multiline={false}
             maxLength={200}
+            editable={!isTranscribing && !recorderState.isRecording}
           />
+
+          {isTranscribing ? (
+            <ActivityIndicator size="small" color="#60a5fa" style={styles.micBtn} />
+          ) : (
+            <Pressable
+              onPress={handleMicPress}
+              style={({ pressed }) => [
+                styles.micBtn,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Mic
+                color={recorderState.isRecording ? "#ef4444" : "#60a5fa"}
+                size={18}
+                strokeWidth={2.5}
+              />
+            </Pressable>
+          )}
 
           <Pressable
             onPress={handleSend}
-            disabled={!inputText.trim() || isTyping}
+            disabled={!inputText.trim() || isTyping || recorderState.isRecording || isTranscribing}
             style={({ pressed }) => [
               styles.sendBtn,
-              (!inputText.trim() || isTyping) && { opacity: 0.35 },
+              (!inputText.trim() || isTyping || recorderState.isRecording || isTranscribing) && { opacity: 0.35 },
               pressed && { opacity: 0.7 },
             ]}
           >
@@ -250,5 +356,9 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     zIndex: 1,
+  },
+  micBtn: {
+    zIndex: 1,
+    paddingHorizontal: 4,
   },
 });

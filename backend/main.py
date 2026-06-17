@@ -1,7 +1,9 @@
 import asyncio
 import json
 import sys
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import os
+import tempfile
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -111,6 +113,43 @@ def reset():
     if _detector:
         _detector.sessions.clear()
     return {"status": "ok"}
+
+
+@app.post("/transcribe")
+async def transcribe_endpoint(file: UploadFile = File(...)):
+    try:
+        suffix = os.path.splitext(file.filename)[1] if file.filename else ".m4a"
+        if not suffix:
+            suffix = ".m4a"
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            api_key = os.environ.get("GROQ_API_KEY")
+            if not api_key:
+                raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured")
+            
+            from groq import Groq
+            client = Groq(api_key=api_key)
+            with open(tmp_path, "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(
+                    file=(os.path.basename(tmp_path), audio_file.read()),
+                    model="whisper-large-v3",
+                )
+            
+            text = transcription.text
+            print(f"[Backend] 🎤 Transcribed text: \"{text}\"")
+            return {"text": text}
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    except Exception as e:
+        print(f"[Backend] ❌ Transcription error: {e}")
+        return {"error": str(e)}
+
 
 class ChatRequest(BaseModel):
     full_frame_b64: str
