@@ -7,7 +7,9 @@ import {
   withSpring,
 } from 'react-native-reanimated';
 import type { TrackedTarget } from '../../store/arTrackingStore';
+import { arOffsetX, arOffsetY } from '../../store/arTrackingStore';
 import type { ARDisclosureLevel } from '../../src/types';
+import { Group } from '@shopify/react-native-skia';
 import { ARRing } from './ARRing';
 import { ARLabel } from './ARLabel';
 
@@ -28,6 +30,7 @@ export function resolveOpacity(
   chatFocusTargetId: string | null,
 ): number {
   if (target.isLost) return 0;
+  if (level === ('DETECTION_FADED' as any)) return 0.05;
   
   // Return same high opacity for all active markers to prevent dimming/blurring
   return 0.85;
@@ -65,12 +68,12 @@ export function ARMarker({
   // This NEVER triggers a React re-render.
   const cx = useDerivedValue(() => {
     const [nx1, ny1, nx2, ny2] = target.boxSV.value;
-    return ((nx1 + nx2) / 2) * screenW;
+    return ((nx1 + nx2) / 2) * screenW + arOffsetX.value;
   });
 
   const cy = useDerivedValue(() => {
     const [nx1, ny1, nx2, ny2] = target.boxSV.value;
-    return ((ny1 + ny2) / 2) * screenH;
+    return ((ny1 + ny2) / 2) * screenH + arOffsetY.value;
   });
 
   const r = useDerivedValue(() => {
@@ -82,25 +85,47 @@ export function ARMarker({
     return baseR * ds;
   });
 
-  const targetOpacity = useMemo(() => resolveOpacity(
-    target, level, spotlightTargetId, activeStepId, chatFocusTargetId
-  ), [target, level, spotlightTargetId, activeStepId, chatFocusTargetId]);
+  const distance = useDerivedValue(() => {
+    const centerScreenX = screenW / 2;
+    const centerScreenY = screenH / 2;
+    const dx = cx.value - centerScreenX;
+    const dy = cy.value - centerScreenY;
+    return Math.sqrt(dx * dx + dy * dy);
+  });
 
-  const opacity = useSharedValue(targetOpacity);
-  useEffect(() => {
-    opacity.value = withTiming(targetOpacity, { duration: 280 });
-  }, [targetOpacity]);
+  const opacity = useDerivedValue(() => {
+    if (level === ('DETECTION_FADED' as any)) {
+      const r_in = 80;
+      const r_out = 250;
+      const d = distance.value;
+      const t = Math.max(0, Math.min(1, (d - r_in) / (r_out - r_in)));
+      const smooth = 3 * t * t - 2 * t * t * t;
+      const proximity = 1 - smooth;
+      return 0.05 + 0.05 * proximity;
+    }
+
+    if (level === 'HAZARD_FOCUS' || target.id === chatFocusTargetId) {
+      return 0.85;
+    }
+
+    const r_in = 80;
+    const r_out = 250;
+    const d = distance.value;
+
+    const t = Math.max(0, Math.min(1, (d - r_in) / (r_out - r_in)));
+    const smooth = 3 * t * t - 2 * t * t * t;
+    const proximity = 1 - smooth;
+
+    return 0.45 + (0.85 - 0.45) * proximity;
+  });
 
   const color     = TYPE_COLOR[target.type] ?? TYPE_COLOR.neutral_context;
   const isCompact = level === 'DETECTION';
   const isActive  = target.step_reference === activeStepId && hasActiveStep;
-  const mounted   = targetOpacity > 0.1;
-
-  // Zero-opacity targets: skip rendering entirely for performance
-  if (targetOpacity === 0 && !target.isLost) return null;
+  const mounted   = true;
 
   return (
-    <>
+    <Group>
       <ARRing
         cx={cx} cy={cy} r={r}
         opacity={opacity}
@@ -116,6 +141,6 @@ export function ARMarker({
         isCompact={isCompact}
         mounted={mounted}
       />
-    </>
+    </Group>
   );
 }

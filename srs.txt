@@ -238,6 +238,14 @@ exit path
 
 The model does not need perfect legal correctness. It needs usable structured guidance for the MVP.
 
+8.4 High-Performance UI Thread Architecture
+
+To maintain a stable 60 FPS rendering performance and eliminate visual stuttering, FixSight divides data mutations into a three-tier asymmetric pipeline:
+
+- Tracking Core (Native C++ / Frame Processor): Local object boundary discovery, feature tracking, and coordinate spatial computations. Communicates via JavaScript Interface (JSI) shared memory.
+- Visual Layer (UI Thread / Reanimated + Skia): Vector drawing (rings, leader lines, highlights) on top of the camera feed. Updates coordinates via Reanimated SharedValues directly, causing zero React JS thread re-renders.
+- Logic Layer (JS Thread / React + Zustand): State machine execution, application navigation, text rendering in the bottom sheet, and audio/voice operations. Communicates via asynchronous batched microtasks.
+
 9. Local Tracking Strategy
 
 The app must not depend on the backend for frame-by-frame tracking.
@@ -270,6 +278,27 @@ flicker
 duplicate detections
 repeated API calls
 unstable overlays
+
+9.1 Mathematical Framework for Spatial Coordination
+
+To project bounding boxes and anchoring targets from physical assets onto the 2D mobile screen viewport, the rendering engine runs a continuous Coordinate Transformation Pipeline. Coordinates of the components are scaled from normalized ratios [x_norm, y_norm] to screen viewport dimensions (W_viewport, H_viewport):
+
+  u = x_norm * W_viewport
+  v = y_norm * H_viewport
+
+Rings and labels are drawn at (u, v) on the full-screen canvas.
+
+9.2 Proximity-Driven Label Progression
+
+The system measures the screen-space Euclidean distance d between the center of the mobile screen viewport (W_viewport/2, H_viewport/2) and the component anchor point (u, v):
+
+  d = sqrt( (W_viewport/2 - u)^2 + (H_viewport/2 - v)^2 )
+
+To animate label visibility transitions smoothly without manual tapping, distance d feeds into an inverse smoothstep interpolation clamped between an inner visibility radius (r_in) and an outer activation boundary (r_out):
+
+  t = clamp( (d - r_in) / (r_out - r_in), 0, 1 )
+  Opacity(d) = 1 - (3*t^2 - 2*t^3)
+
 10. AR Reasoning Model Behavior
 
 The model should not only say “fire detected.”
@@ -442,6 +471,18 @@ Rendering
 AR overlay must remain responsive
 avoid heavy CPU work on main thread
 use native animations and worklets when possible
+
+14.1 API Call Throttling and Frequency Limits
+
+To support zero-infrastructure and zero-cost scaling, API calls to the VLM/LLM backend must be minimized:
+
+- Active Camera & Tracking State: 0 API calls per second. All real-time bounding box renders, tracking adjustments, and smoothing are done completely locally on-device.
+- Event-Driven Requests: Calls are triggered only on explicit interactions:
+  * Camera Scan: 1 HTTP call to '/identify-device'.
+  * Mode Select: 1 HTTP call to '/mode/explain', '/mode/guide', or '/mode/troubleshoot'.
+  * Voice Assistant: 1 HTTP call to '/transcribe' and 1 HTTP call to '/chat'.
+- Continuous Discovery: If automatically checking components, the device applies a 20-30 frame stability window (~1s of persistence) and debounces API requests. Discovery calls are capped at a maximum of one request every 3-5 seconds to prevent rate-limiting.
+
 15. Reliability Rules
 Must handle
 no detection found

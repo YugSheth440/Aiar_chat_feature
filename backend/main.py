@@ -33,7 +33,7 @@ def get_detector():
 def health():
     try:
         d = get_detector()
-        return {"status": "running", "service": "FixSight Scene Analysis", "model": d.model}
+        return {"status": "running", "service": "FixSight Scene Analysis", "model": d.vlm_model}
     except EnvironmentError as e:
         return {"status": "degraded", "error": str(e)}
 
@@ -169,6 +169,147 @@ async def chat_endpoint(req: ChatRequest):
             req.session_id,
             req.device_context,
             req.conversation_history,
+        )
+        return result
+    except Exception as e:
+        return {"event": "error", "message": str(e)}
+
+
+class IdentifyDeviceRequest(BaseModel):
+    image: str = None
+    image_b64: str = None
+    full_frame_b64: str = None
+    device_context: dict = {}
+    session_id: str = "default"
+
+    def get_image(self) -> str:
+        return self.image or self.image_b64 or self.full_frame_b64 or ""
+
+class AnalyzeComponentsRequest(BaseModel):
+    image: str = None
+    image_b64: str = None
+    full_frame_b64: str = None
+    device: str = "AC Induction Motor"
+    device_context: dict = {}
+    session_id: str = "default"
+
+    def get_image(self) -> str:
+        return self.image or self.image_b64 or self.full_frame_b64 or ""
+
+class TroubleshootRequest(BaseModel):
+    image: str = None
+    image_b64: str = None
+    full_frame_b64: str = None
+    device: str = "AC Induction Motor"
+    question: str = None
+    issue: str = None
+    component_id: str = None
+    device_context: dict = {}
+    session_id: str = "default"
+
+    def get_image(self) -> str:
+        return self.image or self.image_b64 or self.full_frame_b64 or ""
+
+    def get_issue(self) -> str:
+        return self.question or self.issue or "General issue"
+
+class ExplainRequest(BaseModel):
+    image: str = None
+    image_b64: str = None
+    full_frame_b64: str = None
+    device: str = "AC Induction Motor"
+    component: str = None
+    component_id: str = None
+    device_context: dict = {}
+    session_id: str = "default"
+
+    def get_image(self) -> str:
+        return self.image or self.image_b64 or self.full_frame_b64 or ""
+
+    def get_component(self) -> str:
+        return self.component or self.component_id or ""
+
+class GuideRequest(BaseModel):
+    image: str = None
+    image_b64: str = None
+    full_frame_b64: str = None
+    device: str = "AC Induction Motor"
+    component_id: str = None
+    device_context: dict = {}
+    session_id: str = "default"
+
+    def get_image(self) -> str:
+        return self.image or self.image_b64 or self.full_frame_b64 or ""
+
+
+@app.post("/identify-device")
+async def identify_device_endpoint(req: IdentifyDeviceRequest):
+    try:
+        detector = get_detector()
+        result = await asyncio.to_thread(
+            detector.identify_device,
+            req.get_image(),
+            req.device_context,
+        )
+        return result
+    except Exception as e:
+        return {"event": "error", "message": str(e)}
+
+@app.post("/analyze-components")
+async def analyze_components_endpoint(req: AnalyzeComponentsRequest):
+    try:
+        detector = get_detector()
+        result = await asyncio.to_thread(
+            detector.analyze_components,
+            req.get_image(),
+            req.device,
+            req.device_context,
+        )
+        return result
+    except Exception as e:
+        return {"event": "error", "message": str(e)}
+
+@app.post("/mode/troubleshoot")
+async def troubleshoot_endpoint(req: TroubleshootRequest):
+    try:
+        detector = get_detector()
+        result = await asyncio.to_thread(
+            detector.troubleshoot_device,
+            req.get_image(),
+            req.device,
+            req.component_id,
+            req.get_issue(),
+            req.device_context,
+        )
+        return result
+    except Exception as e:
+        return {"event": "error", "message": str(e)}
+
+@app.post("/mode/explain")
+async def explain_endpoint(req: ExplainRequest):
+    try:
+        detector = get_detector()
+        result = await asyncio.to_thread(
+            detector.explain_component,
+            req.get_image(),
+            req.device,
+            req.get_component(),
+            req.device_context,
+        )
+        return result
+    except Exception as e:
+        return {"event": "error", "message": str(e)}
+
+@app.post("/mode/guide")
+async def guide_endpoint(req: GuideRequest):
+    try:
+        detector = get_detector()
+        result = await asyncio.to_thread(
+            detector.guide_procedure,
+            req.get_image(),
+            req.device,
+            req.component_id,
+            req.device_context,
         )
         return result
     except Exception as e:

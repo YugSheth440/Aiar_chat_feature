@@ -47,7 +47,7 @@ const MOCK_SCENE_HAZARDS: SceneHazard[] = [
 export function TopBar() {
   const { workflowState, startAnalysis, onHazardsDiscovered, reset } = useWorkflowStore();
   const isReady = workflowState === 'READY';
-  const isAnalyzing = workflowState === 'ANALYZING';
+  const isAnalyzing = workflowState === 'SCANNING';
 
   const handleScan = () => {
     if (isAnalyzing) return;

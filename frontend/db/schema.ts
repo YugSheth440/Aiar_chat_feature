@@ -8,3 +8,12 @@ export const hazardTaxonomy = sqliteTable('hazard_taxonomy', {
   icon: text('icon'),
   default_guidance: text('default_guidance'), // Stored as JSON string
 });
+
+export const chatHistory = sqliteTable('chat_history', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  role: text('role').notNull(), // 'user' | 'assistant'
+  content: text('content').notNull(),
+  timestamp: integer('timestamp').notNull(),
+  focusTargetId: text('focus_target_id'),
+});

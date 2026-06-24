@@ -12,6 +12,7 @@ import Animated, {
 import { BlurView } from 'expo-blur';
 import { MessageCircle, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Speech from 'expo-speech';
 import { useChatStore } from '../../store/chatStore';
 
 const AUTO_DISMISS_MS = 8000;
@@ -28,24 +29,55 @@ export function ChatBubble() {
   const insets = useSafeAreaInsets();
   const { messages, isTyping } = useChatStore();
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedVoice, setSelectedVoice] = React.useState<string | undefined>(undefined);
 
   // Last assistant message
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
 
   const visible = useSharedValue(0);
 
+  // Load the best available voice once on mount
+  useEffect(() => {
+    async function loadVoices() {
+      try {
+        const voices = await Speech.getAvailableVoicesAsync();
+        // Find an enhanced quality English voice (Siri/Google premium)
+        const premiumVoice = voices.find(
+          (v: Speech.Voice) => v.language.startsWith('en') && v.quality === Speech.VoiceQuality.Enhanced
+        ) || voices.find((v: Speech.Voice) => v.language.startsWith('en'));
+
+        if (premiumVoice) {
+          setSelectedVoice(premiumVoice.identifier);
+        }
+      } catch (err) {
+        console.error('Failed to load speech voices:', err);
+      }
+    }
+    loadVoices();
+  }, []);
+
   useEffect(() => {
     if (lastAssistant) {
       visible.value = withSpring(1, { damping: 18, stiffness: 280 });
 
-      // Auto-dismiss
-      if (dismissTimer.current) clearTimeout(dismissTimer.current);
-      dismissTimer.current = setTimeout(() => {
-        visible.value = withTiming(0, { duration: 400 });
-      }, AUTO_DISMISS_MS);
+      // Speak the AI response using the best selected voice
+      Speech.stop();
+      Speech.speak(lastAssistant.content, {
+        voice: selectedVoice,
+        rate: 0.95, // slightly slower for a more natural cadence
+      });
+
+       // Auto-dismiss
+       if (dismissTimer.current) clearTimeout(dismissTimer.current);
+       dismissTimer.current = setTimeout(() => {
+         visible.value = withTiming(0, { duration: 400 });
+       }, AUTO_DISMISS_MS);
     }
-    return () => { if (dismissTimer.current) clearTimeout(dismissTimer.current); };
-  }, [lastAssistant?.id]);
+    return () => {
+      Speech.stop();
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
+    };
+  }, [lastAssistant?.id, selectedVoice]);
 
   const containerStyle = useAnimatedStyle(() => ({
     opacity: visible.value,
@@ -53,6 +85,7 @@ export function ChatBubble() {
   }));
 
   const handleDismiss = () => {
+    Speech.stop();
     if (dismissTimer.current) clearTimeout(dismissTimer.current);
     visible.value = withTiming(0, { duration: 300 });
   };

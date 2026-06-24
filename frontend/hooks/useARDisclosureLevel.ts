@@ -43,7 +43,7 @@ export function useARDisclosureLevel(): {
     // Active when user has tapped a specific step card.
     if (
       activeStepId &&
-      (workflowState === 'SHEET_OPEN' || workflowState === 'HAZARD_FOCUSED')
+      (workflowState === 'GUIDE_MODE')
     ) {
       // Find the target whose step_reference matches the active step
       const stepTarget = targets.find((t) => t.step_reference === activeStepId);
@@ -58,8 +58,7 @@ export function useARDisclosureLevel(): {
     // ── L2: Hazard Focus ──────────────────────────────────────────────────
     // Active when a hazard is selected but no specific step is being focused.
     if (
-      workflowState === 'HAZARD_FOCUSED' ||
-      workflowState === 'SHEET_OPEN'
+      workflowState === 'EXPLORE_LABELS'
     ) {
       // Spotlight = highest-priority mitigation_tool for this hazard
       const mitigation = targets

@@ -9,15 +9,19 @@
     "base-64": "^1.0.0",
     "drizzle-orm": "^0.45.2",
     "expo": "~54.0.0",
-    "expo-audio": "^56.0.12",
+    "expo-asset": "~12.0.13",
+    "expo-audio": "~1.1.1",
     "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
+    "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",
     "expo-file-system": "~19.0.23",
     "expo-haptics": "~15.0.8",
     "expo-linking": "~8.0.12",
     "expo-router": "~6.0.24",
     "expo-screen-orientation": "~9.0.9",
+    "expo-sensors": "~15.0.8",
+    "expo-speech": "~14.0.8",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "lucide-react-native": "^0.475.0",
@@ -40,8 +44,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@types/react": "^18.2.79",
-    "@types/react-native": "^0.73.0",
+    "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
   },
   "scripts": {

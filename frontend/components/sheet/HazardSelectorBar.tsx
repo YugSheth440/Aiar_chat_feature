@@ -104,8 +104,8 @@ export function HazardSelectorBar() {
 
   // Show pills when hazards are discovered OR when sheet is dragged fully down
   const pillsVisible =
-    workflowState === 'HAZARDS_DISCOVERED' ||
-    ((workflowState === 'HAZARD_FOCUSED' || workflowState === 'SHEET_OPEN') &&
+    (workflowState as any) === 'HAZARDS_DISCOVERED' ||
+    (((workflowState as any) === 'HAZARD_FOCUSED' || (workflowState as any) === 'SHEET_OPEN') &&
       sheetSnapIndex <= 0);
 
   if (!pillsVisible || detectedHazards.length === 0) return null;

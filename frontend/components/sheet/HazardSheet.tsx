@@ -1,5 +1,4 @@
-import React, { useCallback, useRef, useMemo, useEffect } from 'react';
-import type { Hazard } from '../../src/types';
+import React, { useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,507 +15,745 @@ import Animated, {
   FadeOut,
   useSharedValue,
   useAnimatedStyle,
+  withRepeat,
   withSequence,
   withTiming,
   withSpring,
-  withRepeat,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import {
   CheckCircle,
-  Circle,
-  ShieldAlert,
-  Zap,
-  Search,
-  Brush,
-  Plus,
-  ChevronUp,
-  MapPin,
+  Star,
+  Compass,
+  Info,
+  Mic,
+  X,
+  Volume2,
+  ArrowLeft,
+  ArrowRight,
+  Sparkles,
 } from 'lucide-react-native';
-import { useWorkflowStore } from '../../store/workflowStore';
-import type { ActionStep, RiskLevel } from '../../src/types';
+import { useWorkflowStore, ActiveModeType } from '../../store/workflowStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Speech from 'expo-speech';
+import { BACKEND_URL } from '../../src/config';
+import {
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+} from 'expo-audio';
+import { useChatStore } from '../../store/chatStore';
+import { useARTrackingStore } from '../../store/arTrackingStore';
+import { ActivityIndicator } from 'react-native';
 
-const RISK_COLOR: Record<RiskLevel, string> = {
-  LOW:      '#22c55e',
-  MEDIUM:   '#fb923c',
-  HIGH:     '#ef4444',
-  CRITICAL: '#ef4444',
-};
+// ─── Glass Background ─────────────────────────────────────────────
+const CustomBackground = ({ style }: any) => (
+  <View style={[style, { overflow: 'hidden', borderTopLeftRadius: 28, borderTopRightRadius: 28 }]}>
+    <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(15,18,25,0.6)' }]} />
+  </View>
+);
 
-const RISK_LABEL: Record<RiskLevel, string> = {
-  LOW:      'Low Risk',
-  MEDIUM:   'Medium Risk',
-  HIGH:     'High Risk',
-  CRITICAL: 'High Risk',
-};
-
-// ── Tag chip ─────────────────────────────────────────────────────
-function TagChip({ label, dot, dotColor }: { label: string; dot?: boolean; dotColor?: string }) {
-  return (
-    <View style={styles.chip}>
-      {dot && <View style={[styles.chipDot, dotColor ? { backgroundColor: dotColor } : {}]} />}
-      <Text style={styles.chipText}>{label}</Text>
-    </View>
-  );
-}
-
-// ── Step card ────────────────────────────────────────────────────
-function StepCard({
-  action,
-  index,
-  isCompleted,
-  isActive,
-  onToggle,
-  onPress,
-}: {
-  action: ActionStep;
-  index: number;
-  isCompleted: boolean;
-  isActive: boolean;
-  onToggle: () => void;
-  onPress: () => void;
-}) {
-  const scale = useSharedValue(1);
-  const cardStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    backgroundColor: isCompleted ? 'rgba(74,222,128,0.07)' : isActive ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
-    borderColor: isCompleted ? 'rgba(74,222,128,0.22)' : isActive ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.08)',
-  }));
-
-  return (
-    <Pressable
-      onPress={() => {
-        scale.value = withSequence(withTiming(0.97, { duration: 70 }), withSpring(1, { damping: 12 }));
-        onPress();
-      }}
-    >
-      <Animated.View entering={FadeIn.delay(index * 80).duration(300)}>
-        <Animated.View style={[styles.stepCard, cardStyle]}>
-          <View style={[styles.stepNum, { backgroundColor: isCompleted ? 'rgba(74,222,128,0.18)' : 'rgba(255,255,255,0.08)' }]}>
-            <Text style={[styles.stepNumText, { color: isCompleted ? '#4ade80' : 'rgba(255,255,255,0.55)' }]}>
-              {index + 1}
-            </Text>
-          </View>
-          <View style={styles.stepBody}>
-            <View style={styles.stepTitleRow}>
-              <Text style={[styles.stepTitle, { opacity: isCompleted ? 0.45 : 1 }]} numberOfLines={2}>
-                {action.title}
-              </Text>
-              {action.isCritical && !isCompleted && (
-                <View style={styles.urgentTag}>
-                  <Text style={styles.urgentText}>Urgent</Text>
-                </View>
-              )}
-            </View>
-            <Text style={[styles.stepSub, { opacity: isCompleted ? 0.35 : 0.6 }]}>{action.subtitle}</Text>
-            {action.estimatedTime && (
-              <Text style={styles.stepTime}>{action.estimatedTime}</Text>
-            )}
-          </View>
-          {/* AR-pin indicator: shown when step is active — tells user AR is focused here */}
-          {isActive && !isCompleted && (
-            <Animated.View entering={FadeIn.duration(200)} style={styles.arPinBadge}>
-              <MapPin color="#60a5fa" size={13} strokeWidth={2.5} />
-            </Animated.View>
-          )}
-          <Pressable onPress={onToggle} hitSlop={10}>
-            {isCompleted
-              ? <Animated.View entering={FadeIn.duration(200)}><CheckCircle color="#4ade80" size={26} strokeWidth={2} /></Animated.View>
-              : <Circle color={isActive ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.2)"} size={26} strokeWidth={1.5} />
-            }
-          </Pressable>
-        </Animated.View>
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Minimized arrow indicator (when sheet is at snap 0)
-// ─────────────────────────────────────────────────────────────────
-function ArrowIndicator({ onPress }: { onPress: () => void }) {
-  const insets = useSafeAreaInsets();
-  const arrowY = useSharedValue(0);
-
+// ─── Soundwave/Pulsing Visualizer for Voice Assistant ─────────────
+function SoundwaveBar({ color }: { color: string }) {
+  const scaleYVal = useSharedValue(0.25);
   useEffect(() => {
-    arrowY.value = withRepeat(
-      withSequence(withTiming(-4, { duration: 600 }), withTiming(0, { duration: 600 })),
-      -1, true
-    );
-  }, []);
-
-  const arrowStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: arrowY.value }],
-  }));
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.arrowBtn, { bottom: insets.bottom + 8 }]}
-    >
-      <Animated.View style={[styles.arrowInner, arrowStyle]}>
-        <ChevronUp color="rgba(255,255,255,0.6)" size={18} strokeWidth={2.5} />
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Skeleton Body (Analyzing State)
-// ─────────────────────────────────────────────────────────────────
-function SkeletonBody() {
-  const op = useSharedValue(0.2);
-  useEffect(() => {
-    op.value = withRepeat(
-      withSequence(withTiming(0.6, { duration: 800 }), withTiming(0.2, { duration: 800 })),
+    scaleYVal.value = withRepeat(
+      withSequence(
+        withTiming(0.4 + Math.random() * 0.6, { duration: 300 + Math.random() * 200 }),
+        withTiming(0.25, { duration: 300 + Math.random() * 200 })
+      ),
       -1,
       true
     );
   }, []);
-
-  const animStyle = useAnimatedStyle(() => ({ opacity: op.value }));
-
+  const barStyle = useAnimatedStyle(() => ({
+    transform: [{ scaleY: scaleYVal.value }],
+  }));
   return (
-    <Animated.View style={[{ paddingTop: 12 }, animStyle]}>
-      {/* Header Placeholder */}
-      <View style={{ width: 70, height: 14, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4, marginBottom: 14 }} />
-      
-      {/* Title Placeholder */}
-      <View style={{ width: '80%', height: 32, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8, marginBottom: 8 }} />
-      <View style={{ width: '50%', height: 16, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4, marginBottom: 24 }} />
-      
-      {/* Tags Placeholder */}
-      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 30 }}>
-        <View style={{ width: 70, height: 28, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 14 }} />
-        <View style={{ width: 90, height: 28, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 14 }} />
-      </View>
-
-      {/* Button Placeholder */}
-      <View style={{ width: 140, height: 48, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 16 }} />
-    </Animated.View>
+    <Animated.View
+      style={[styles.soundwaveBar, { backgroundColor: color, height: 35 }, barStyle]}
+    />
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Sheet body content — shared between portrait & landscape
-// ─────────────────────────────────────────────────────────────────
-function SheetBody({
-  hazard,
-  color,
-  riskLabel,
-  completedStepIds,
-  toggleStep,
-  allDone,
-  isExpanded,
-  onExpand,
-}: {
-  hazard: Hazard;
-  color: string;
-  riskLabel: string;
-  completedStepIds: Set<string>;
-  toggleStep: (id: string) => void;
-  allDone: boolean;
-  isExpanded: boolean;
-  onExpand: () => void;
-}) {
-  const activeStepId = useWorkflowStore(s => s.activeStepId);
-  const setActiveStep = useWorkflowStore(s => s.setActiveStep);
-
+function SoundwaveVisualizer({ color = '#10B981', count = 5 }) {
   return (
-    <View>
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <Text style={styles.aiLabel}>AI Insight</Text>
-        <View style={[styles.riskBadge, { backgroundColor: `${color}22`, borderColor: `${color}55` }]}>
-          <Text style={[styles.riskBadgeText, { color }]}>{riskLabel}</Text>
-          <View style={[styles.riskDiamond, { backgroundColor: color }]} />
-        </View>
-      </View>
-
-      {/* ── Title ── */}
-      <Text style={styles.title}>{hazard.title}</Text>
-      <Text style={styles.subtitle}>{hazard.subtitle}</Text>
-
-      {/* ── Tags ── */}
-      <View style={styles.tagsRow}>
-        {hazard.tags.map((tag: string, i: number) => (
-          <TagChip key={i} label={tag} dot={i === 0} dotColor={color} />
-        ))}
-      </View>
-
-      {/* ── "Next Step" CTA (peek state only) ── */}
-      {!isExpanded && (
-        <Pressable
-          onPress={async () => {
-            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onExpand();
-          }}
-          style={({ pressed }) => [styles.nextStepBtn, pressed && { opacity: 0.82 }]}
-        >
-          <View style={styles.nextStepIcon}>
-            <Plus color="#4ade80" size={18} strokeWidth={2.5} />
-          </View>
-          <Text style={styles.nextStepText}>Next Step</Text>
-        </Pressable>
-      )}
-
-      {/* ── Full expanded content ── */}
-      {isExpanded && (
-        <Animated.View entering={FadeIn.duration(300)}>
-          <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>AI RESPONSE PLAN</Text>
-          <Text style={styles.sectionSub}>Resolve: {hazard.title}</Text>
-
-          <View style={styles.warningBlock}>
-            <Text style={styles.warningText}>{hazard.whyItMatters}</Text>
-          </View>
-
-          <View style={styles.stepsWrap}>
-            {hazard.actions.map((action: ActionStep, i: number) => (
-              <StepCard
-                key={action.id}
-                action={action}
-                index={i}
-                isCompleted={completedStepIds.has(action.id)}
-                isActive={activeStepId === action.id}
-                onToggle={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  toggleStep(action.id);
-                  // Auto-advance focus to next uncompleted step
-                  const nextStep = hazard.actions.find(
-                    (a: ActionStep, idx: number) => idx > i && !completedStepIds.has(a.id)
-                  );
-                  if (nextStep) setActiveStep(nextStep.id);
-                }}
-                onPress={() => setActiveStep(action.id)}
-              />
-            ))}
-          </View>
-
-          {allDone && (
-            <Animated.View entering={FadeIn.delay(200).duration(400)} style={styles.completionBanner}>
-              <CheckCircle color="#4ade80" size={20} strokeWidth={2} />
-              <Text style={styles.completionText}>All steps completed — stay safe!</Text>
-            </Animated.View>
-          )}
-        </Animated.View>
-      )}
+    <View style={styles.soundwaveRow}>
+      {Array.from({ length: count }).map((_, i) => (
+        <SoundwaveBar key={i} color={color} />
+      ))}
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Portrait bottom sheet with 3 snap points
-// ─────────────────────────────────────────────────────────────────
-const CustomBackground = ({ style }: any) => (
-  <View style={[style, { overflow: 'hidden', borderTopLeftRadius: 28, borderTopRightRadius: 28 }]}>
-    <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(11,12,18,0.5)' }]} />
-  </View>
-);
-
-function PortraitSheet() {
-  const {
-    workflowState,
-    selectedHazard,
-    completedStepIds,
-    toggleStep,
-    openSheet,
-    setSheetSnapIndex,
-    sheetSnapIndex,
-  } = useWorkflowStore();
-  const insets = useSafeAreaInsets();
-  const sheetRef = useRef<BottomSheetGorhom>(null);
-
-  /**
-   * 3 snap points:
-   *   0: '9%'  → minimized — only drag handle visible + arrow indicator
-   *   1: '30%' → peek — AI Insight header + title + tags + Next Step
-   *   2: '82%' → full — scrollable step checklist
-   */
-  const snapPoints = useMemo(() => ['9%', '30%', '82%'], []);
-
-  const isVisible =
-    workflowState === 'HAZARD_FOCUSED' || workflowState === 'SHEET_OPEN' || workflowState === 'ANALYZING';
-
-  // When workflow state changes, snap the sheet to the right position
-  useEffect(() => {
-    if (workflowState === 'HAZARD_FOCUSED' || workflowState === 'ANALYZING') {
-      sheetRef.current?.snapToIndex(1); // peek
-      setSheetSnapIndex(1);
-    } else if (workflowState === 'SHEET_OPEN') {
-      sheetRef.current?.snapToIndex(2); // full
-      setSheetSnapIndex(2);
-    } else {
-      sheetRef.current?.close();
-      setSheetSnapIndex(-1);
-    }
-  }, [workflowState]);
-
-  // Track snap changes (user drag)
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      setSheetSnapIndex(index);
-      if (index === 2 && workflowState === 'HAZARD_FOCUSED') {
-        openSheet();
-      }
-    },
-    [workflowState, openSheet, setSheetSnapIndex]
-  );
-
-  if (!isVisible) return null;
-
-  const isAnalyzing = workflowState === 'ANALYZING';
-
-  let color = '#fff';
-  let riskLabel = '';
-  let allDone = false;
-  if (selectedHazard) {
-    color = RISK_COLOR[selectedHazard.riskLevel];
-    riskLabel = RISK_LABEL[selectedHazard.riskLevel];
-    allDone = selectedHazard.actions.every((a) => completedStepIds.has(a.id));
-  }
-  const isMinimized = sheetSnapIndex === 0;
-
-  return (
-    <>
-      {/* Arrow indicator shown when sheet is minimized */}
-      {isMinimized && (
-        <Animated.View
-          entering={FadeIn.duration(250)}
-          exiting={FadeOut.duration(150)}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="box-none"
-        >
-          <ArrowIndicator
-            onPress={() => {
-              sheetRef.current?.snapToIndex(1);
-              setSheetSnapIndex(1);
-            }}
-          />
-        </Animated.View>
-      )}
-
-      <BottomSheetGorhom
-        ref={sheetRef}
-        index={1}
-        snapPoints={snapPoints}
-        enablePanDownToClose={false}   // don't fully close — just minimize to snap 0
-        onChange={handleSheetChange}
-        backgroundComponent={CustomBackground}
-        handleIndicatorStyle={styles.handle}
-        style={styles.sheet}
-      >
-        {/* Don't render content when minimized (just show drag handle) */}
-        {!isMinimized && (
-          <BottomSheetScrollView contentContainerStyle={styles.scrollContent}>
-            {isAnalyzing || !selectedHazard ? (
-              <SkeletonBody />
-            ) : (
-              <SheetBody
-                hazard={selectedHazard}
-                color={color}
-                riskLabel={riskLabel}
-                completedStepIds={completedStepIds}
-                toggleStep={toggleStep}
-                allDone={allDone}
-                isExpanded={workflowState === 'SHEET_OPEN' || sheetSnapIndex === 2}
-                onExpand={openSheet}
-              />
-            )}
-          </BottomSheetScrollView>
-        )}
-      </BottomSheetGorhom>
-    </>
-  );
+// ─── Bottom Sheet Contents ────────────────────────────────────────
+interface SheetBodyProps {
+  audioRecorder: any;
+  recorderState: any;
+  isTranscribing: boolean;
+  setIsTranscribing: (val: boolean) => void;
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Landscape right-side panel
-// ─────────────────────────────────────────────────────────────────
-function LandscapePanel() {
-  const { workflowState, selectedHazard, completedStepIds, toggleStep, openSheet, setSheetSnapIndex } =
-    useWorkflowStore();
-  const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+function SheetBody({
+  audioRecorder,
+  recorderState,
+  isTranscribing,
+  setIsTranscribing,
+}: SheetBodyProps) {
+  const {
+    workflowState,
+    deviceName,
+    deviceConfidence,
+    deviceDescription,
+    components,
+    activeComponentIndex,
+    activeStepIndex,
+    guideSteps,
+    voiceResponseText,
+    voiceSolutions,
+    confirmDevice,
+    selectMode,
+    nextComponent,
+    prevComponent,
+    nextStep,
+    prevStep,
+    setWorkflowState,
+    setVoiceSpeakingState,
+    setVoiceActiveState,
+    reset,
+    runRealScan,
+    setActiveComponentIndex,
+    activeMode,
+    likelyIssue,
+    troubleshootSummary,
+    troubleshootCauses,
+    troubleshootActions,
+  } = useWorkflowStore();
 
-  const panelW = Math.min(360, width * 0.42);
-  const slideX = useSharedValue(panelW);
+  const [selectedVoice, setSelectedVoice] = React.useState<string | undefined>(undefined);
 
-  const isVisible =
-    workflowState === 'HAZARD_FOCUSED' || workflowState === 'SHEET_OPEN' || workflowState === 'ANALYZING';
+  useEffect(() => {
+    async function loadVoices() {
+      try {
+        const voices = await Speech.getAvailableVoicesAsync();
+        const premiumVoice = voices.find(
+          (v: Speech.Voice) => v.language.startsWith('en') && v.quality === Speech.VoiceQuality.Enhanced
+        ) || voices.find((v: Speech.Voice) => v.language.startsWith('en'));
+
+        if (premiumVoice) {
+          setSelectedVoice(premiumVoice.identifier);
+        }
+      } catch (err) {
+        console.error('[Voice] Failed to load speech voices:', err);
+      }
+    }
+    loadVoices();
+  }, []);
+
+  const startRecording = async () => {
+    try {
+      const permission = await getRecordingPermissionsAsync();
+      if (!permission.granted) {
+        const request = await requestRecordingPermissionsAsync();
+        if (!request.granted) {
+          alert('Microphone permission is required to record audio.');
+          setWorkflowState('MODE_SELECTION');
+          return;
+        }
+      }
+
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: true,
+      });
+
+      if (!recorderState.canRecord) {
+        await audioRecorder.prepareToRecordAsync();
+      }
+      await audioRecorder.record();
+    } catch (err) {
+      console.error('[Voice] Failed to start recording:', err);
+    }
+  };
+
+  const stopListeningAndProcess = async () => {
+    if (isTranscribing) return;
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (!recorderState.isRecording) {
+      startRecording();
+      return;
+    }
+
+    try {
+      setIsTranscribing(true);
+      await audioRecorder.stop();
+      
+      const uri = audioRecorder.uri;
+      if (!uri) {
+        console.error('[Voice] No recording URI found');
+        setIsTranscribing(false);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', {
+        uri: uri,
+        name: 'audio.m4a',
+        type: 'audio/m4a',
+      } as any);
+
+      console.log('[Voice] Sending audio file to backend /transcribe...');
+      const response = await fetch(`${BACKEND_URL}/transcribe`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.text) {
+        const transcribedText = data.text;
+        console.log('[Voice] Transcribed text:', transcribedText);
+        
+        const { lastCapturedImageB64, cameraRef } = useWorkflowStore.getState();
+        let b64 = lastCapturedImageB64;
+        
+        if (!b64 && cameraRef) {
+          try {
+            const photo = await cameraRef.takePhoto({ flash: 'off' });
+            const imgRes = await fetch(`file://${photo.path}`);
+            const blob = await imgRes.blob();
+            const reader = new FileReader();
+            await new Promise<void>((resolve) => {
+              reader.onloadend = () => {
+                b64 = (reader.result as string).split(',')[1];
+                resolve();
+              };
+              reader.readAsDataURL(blob);
+            });
+          } catch (err) {
+            console.error('[Voice] Failed to capture frame during voice request:', err);
+          }
+        }
+        
+        if (!b64) b64 = "";
+
+        const chatRes = await fetch(`${BACKEND_URL}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            full_frame_b64: b64,
+            user_message: transcribedText,
+            session_id: 'default',
+            conversation_history: useChatStore.getState().getHistory(3),
+            device_context: { lighting: 'normal', motion: 'low', device_mode: 'voice_sheet' }
+          })
+        });
+
+        if (chatRes.ok) {
+          const chatData = await chatRes.json();
+          const reply = chatData.chat_reply || chatData.summary || "No response received.";
+          
+          let solutions: string[] = [];
+          if (chatData.general_solutions && chatData.general_solutions.length > 0) {
+            solutions = chatData.general_solutions;
+          } else if (chatData.hazards && chatData.hazards.length > 0 && chatData.hazards[0].guidance?.actions) {
+            solutions = chatData.hazards[0].guidance.actions.map((act: any) => 
+              act.title + (act.subtitle ? ` — ${act.subtitle}` : "")
+            );
+          } else if (chatData.actions && chatData.actions.length > 0) {
+            solutions = chatData.actions;
+          }
+
+          if (chatData.spatial_targets?.length > 0) {
+            useARTrackingStore.getState().initFromVLM(chatData.spatial_targets);
+          }
+          if (chatData.chat_focus_target_id) {
+            useARTrackingStore.getState().setChatFocusTarget(chatData.chat_focus_target_id);
+            const targetIdx = components.findIndex((c) => c.id === chatData.chat_focus_target_id);
+            if (targetIdx !== -1) {
+              setActiveComponentIndex(targetIdx);
+            }
+          }
+          
+          const lowercaseText = transcribedText.toLowerCase();
+          if (lowercaseText.includes('troubleshoot') || lowercaseText.includes('diagnose')) {
+            selectMode('troubleshoot');
+          } else if (lowercaseText.includes('explain') || lowercaseText.includes('explore')) {
+            selectMode('explain');
+          } else if (lowercaseText.includes('guide') || lowercaseText.includes('procedure') || lowercaseText.includes('step-by-step') || lowercaseText.includes('step by step')) {
+            selectMode('guide');
+          }
+          
+          setVoiceSpeakingState(reply, solutions);
+        } else {
+          setVoiceSpeakingState("Sorry, I could not reach the server to answer your question.");
+        }
+      } else {
+        console.warn('[Voice] No text returned from transcription');
+        setVoiceSpeakingState("I couldn't hear what you said. Please try again.");
+      }
+    } catch (err) {
+      console.error('[Voice] Error in voice processing pipeline:', err);
+      setVoiceSpeakingState("There was an error processing your voice command.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (workflowState === 'VOICE_ACTIVE') {
+      startRecording();
+    }
+    return () => {
+      if (audioRecorder.isRecording) {
+        audioRecorder.stop().catch(() => {});
+      }
+    };
+  }, [workflowState]);
+
+  useEffect(() => {
+    if (workflowState === 'EXPLORE_LABELS' && components[activeComponentIndex]) {
+      const activePart = components[activeComponentIndex];
+      Speech.stop();
+      Speech.speak(`${activePart.label}. ${activePart.description}`, {
+        rate: 0.95,
+      });
+    }
+  }, [activeComponentIndex, workflowState]);
+
+  useEffect(() => {
+    if (workflowState === 'GUIDE_MODE' && guideSteps[activeStepIndex]) {
+      const currentStep = guideSteps[activeStepIndex];
+      Speech.stop();
+      Speech.speak(`Step ${activeStepIndex + 1}. ${currentStep.title}. ${currentStep.description}`, {
+        rate: 0.95,
+      });
+    }
+  }, [activeStepIndex, workflowState]);
+
+  useEffect(() => {
+    if (workflowState === 'VOICE_SPEAKING' && voiceResponseText) {
+      Speech.stop();
+      Speech.speak(voiceResponseText, {
+        voice: selectedVoice,
+        rate: 0.95,
+      });
+    }
+  }, [voiceResponseText, workflowState, selectedVoice]);
+
+  useEffect(() => {
+    return () => {
+      Speech.stop();
+    };
+  }, []);
+
+  const handleModeSelect = async (mode: ActiveModeType) => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    selectMode(mode);
+  };
+
+  switch (workflowState) {
+    case 'IDENTIFIED':
+      return (
+        <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.contentContainer}>
+          <Text style={styles.deviceNameText}>{deviceName}</Text>
+          <Text style={styles.confidenceText}>{deviceConfidence}% Confidence</Text>
+          <Text style={styles.descText}>{deviceDescription}</Text>
+          <View style={styles.buttonRow}>
+            <Pressable
+              onPress={() => confirmDevice(false)}
+              style={({ pressed }) => [styles.btnSecondary, pressed && styles.pressed]}
+            >
+              <Text style={styles.btnSecondaryText}>No, not this</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => confirmDevice(true)}
+              style={({ pressed }) => [styles.btnPrimary, pressed && styles.pressed]}
+            >
+              <Text style={styles.btnPrimaryText}>Yes, correct</Text>
+            </Pressable>
+          </View>
+        </Animated.View>
+      );
+
+    case 'MODE_SELECTION':
+      return (
+        <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.contentContainer}>
+          <View style={styles.pillLabelRow}>
+            <View style={styles.pillLabel}>
+              <Text style={styles.pillLabelText}>{deviceName} • {deviceConfidence}% Confidence</Text>
+            </View>
+          </View>
+          <Text style={styles.titleText}>What would you like to do?</Text>
+          <Text style={styles.subtitleText}>Choose a mode to continue</Text>
+
+          <View style={styles.modeOptions}>
+            <Pressable
+              onPress={() => handleModeSelect('troubleshoot')}
+              style={({ pressed }) => [styles.modeCard, { borderColor: 'rgba(239,68,68,0.2)' }, pressed && styles.pressed]}
+            >
+              <View style={[styles.modeIconContainer, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
+                <Star color="#EF4444" size={20} fill="#EF4444" />
+              </View>
+              <View style={styles.modeTextContainer}>
+                <Text style={[styles.modeCardTitle, { color: '#EF4444' }]}>Troubleshoot</Text>
+                <Text style={styles.modeCardDesc}>Find and diagnose issues</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleModeSelect('guide')}
+              style={({ pressed }) => [styles.modeCard, { borderColor: 'rgba(16,185,129,0.2)' }, pressed && styles.pressed]}
+            >
+              <View style={[styles.modeIconContainer, { backgroundColor: 'rgba(16,185,129,0.1)' }]}>
+                <Compass color="#10B981" size={20} />
+              </View>
+              <View style={styles.modeTextContainer}>
+                <Text style={[styles.modeCardTitle, { color: '#10B981' }]}>Guide</Text>
+                <Text style={styles.modeCardDesc}>Get step-by-step guidance</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleModeSelect('explain')}
+              style={({ pressed }) => [styles.modeCard, { borderColor: 'rgba(59,130,246,0.2)' }, pressed && styles.pressed]}
+            >
+              <View style={[styles.modeIconContainer, { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
+                <Info color="#3B82F6" size={20} />
+              </View>
+              <View style={styles.modeTextContainer}>
+                <Text style={[styles.modeCardTitle, { color: '#3B82F6' }]}>Explain</Text>
+                <Text style={styles.modeCardDesc}>Learn about components</Text>
+              </View>
+            </Pressable>
+          </View>
+        </Animated.View>
+      );
+
+    case 'EXPLORE_LABELS': {
+      const activePart = components[activeComponentIndex];
+      const isTroubleshoot = activeMode === 'troubleshoot';
+
+      const isNoIssue = isTroubleshoot && likelyIssue && (
+        likelyIssue.toLowerCase().includes('none') ||
+        likelyIssue.toLowerCase().includes('no issue') ||
+        likelyIssue.toLowerCase().includes('normal') ||
+        likelyIssue.toLowerCase().includes('allright') ||
+        likelyIssue.toLowerCase().includes('operational') ||
+        likelyIssue.toLowerCase().includes('clear') ||
+        likelyIssue.toLowerCase().includes('no anomaly')
+      );
+
+      const cardBorderColor = isNoIssue ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.22)';
+      const cardBgColor = isNoIssue ? 'rgba(16,185,129,0.06)' : 'rgba(239, 68, 68, 0.08)';
+      const titleColor = isNoIssue ? '#10B981' : '#EF4444';
+      const HeaderIcon = isNoIssue ? CheckCircle : Sparkles;
+
+      return (
+        <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.contentContainer}>
+          {!isTroubleshoot && (
+            <>
+              <View style={styles.detailsHeader}>
+                <Text style={styles.detailsPartTitle}>{activePart?.label}</Text>
+                <Text style={styles.indexIndicator}>{activeComponentIndex + 1} / {components.length}</Text>
+              </View>
+              <Text style={styles.detailsDesc}>{activePart?.description}</Text>
+            </>
+          )}
+
+          {isTroubleshoot && likelyIssue && (
+            <View style={[styles.troubleshootSection, { borderColor: cardBorderColor, backgroundColor: cardBgColor }]}>
+              <View style={styles.troubleshootHeader}>
+                <HeaderIcon color={titleColor} size={16} />
+                <Text style={[styles.troubleshootTitle, { color: titleColor }]}>
+                  {isNoIssue ? 'Status Summary' : 'Troubleshooting Diagnosis'}
+                </Text>
+              </View>
+              <Text style={styles.troubleshootIssue}>
+                {isNoIssue ? 'Status: Normal / No Issues' : `Suspected Issue: ${likelyIssue}`}
+              </Text>
+              {troubleshootSummary ? <Text style={styles.troubleshootSummary}>{troubleshootSummary}</Text> : null}
+              
+              {troubleshootCauses && troubleshootCauses.length > 0 && !isNoIssue && (
+                <View style={styles.troubleshootGroup}>
+                  <Text style={styles.troubleshootSubheading}>Possible Causes:</Text>
+                  {troubleshootCauses.map((cause, idx) => (
+                    <Text key={idx} style={styles.troubleshootBullet}>• {cause}</Text>
+                  ))}
+                </View>
+              )}
+
+              {troubleshootActions && troubleshootActions.length > 0 && (
+                <View style={styles.troubleshootGroup}>
+                  <Text style={styles.troubleshootSubheading}>
+                    {isNoIssue ? 'Maintenance/Inspection Tips:' : 'Recommended Actions:'}
+                  </Text>
+                  {troubleshootActions.map((act, idx) => (
+                    <Text key={idx} style={styles.troubleshootBullet}>• {act}</Text>
+                  ))}
+                </View>
+              )}
+
+              {/* Mic button below the text block */}
+              <View style={styles.troubleshootMicRow}>
+                <Pressable
+                  onPress={async () => {
+                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setVoiceActiveState(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.troubleshootMicBtn,
+                    { backgroundColor: isNoIssue ? '#10B981' : '#EF4444', shadowColor: isNoIssue ? '#10B981' : '#EF4444' },
+                    pressed && styles.pressed
+                  ]}
+                >
+                  <Mic color="#fff" size={15} strokeWidth={2.5} />
+                  <Text style={styles.troubleshootMicBtnText}>Ask Voice Assistant</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {!isTroubleshoot && (
+            <>
+              <View style={styles.statusDivider} />
+
+              <View style={styles.detailsFooter}>
+                <View style={styles.statusBadge}>
+                  <View style={[styles.statusDot, { backgroundColor: '#10B981' }]} />
+                  <Text style={styles.statusText}>Current Status: {activePart?.status}</Text>
+                </View>
+
+                <View style={styles.arrowControls}>
+                  <Pressable
+                    onPress={async () => {
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      prevComponent();
+                    }}
+                    style={styles.controlArrowBtn}
+                  >
+                    <ArrowLeft color="#fff" size={16} />
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      nextComponent();
+                    }}
+                    style={styles.controlArrowBtn}
+                  >
+                    <ArrowRight color="#fff" size={16} />
+                  </Pressable>
+                </View>
+              </View>
+            </>
+          )}
+
+          <View style={[styles.buttonRow, { marginTop: 20 }]}>
+            <Pressable
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                runRealScan();
+              }}
+              style={({ pressed }) => [styles.btnSecondary, pressed && styles.pressed, { flex: 1 }]}
+            >
+              <Text style={styles.btnSecondaryText}>That's not correct (Re-scan)</Text>
+            </Pressable>
+          </View>
+        </Animated.View>
+      );
+    }
+
+    case 'VOICE_ACTIVE':
+      return (
+        <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.voiceWrapper}>
+          <Pressable
+            onPress={() => setWorkflowState('MODE_SELECTION')}
+            style={styles.voiceClose}
+          >
+            <X color="#9CA3AF" size={18} />
+          </Pressable>
+          
+          <SoundwaveVisualizer color="#10B981" count={12} />
+          
+          <Text style={styles.voiceHeader}>Listening...</Text>
+          <Text style={styles.voiceBigText}>How can I help you?</Text>
+          <Text style={styles.voiceSubtext}>
+            {isTranscribing ? "Processing audio..." : "Tap to stop listening"}
+          </Text>
+ 
+          <Pressable
+            onPress={stopListeningAndProcess}
+            disabled={isTranscribing}
+            style={[styles.micCircleButton, isTranscribing && { opacity: 0.6 }]}
+          >
+            {isTranscribing ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Mic color="#fff" size={28} strokeWidth={2.5} />
+            )}
+          </Pressable>
+        </Animated.View>
+      );
+
+    case 'VOICE_SPEAKING':
+      return (
+        <Animated.View entering={FadeIn} style={styles.voiceWrapper}>
+          <Pressable
+            onPress={() => setWorkflowState('MODE_SELECTION')}
+            style={styles.voiceClose}
+          >
+            <X color="#9CA3AF" size={18} />
+          </Pressable>
+
+          <SoundwaveVisualizer color="#EF4444" count={8} />
+
+          <Text style={styles.voiceHeader}>Speaking...</Text>
+          <ScrollView style={styles.responseScroll} contentContainerStyle={styles.responseContent}>
+            <Text style={styles.responseText}>{voiceResponseText}</Text>
+            
+            {voiceSolutions && voiceSolutions.length > 0 && (
+              <View style={styles.actionList}>
+                {voiceSolutions.map((sol, idx) => (
+                  <View key={idx} style={styles.actionBullet}>
+                    <CheckCircle color="#10B981" size={16} />
+                    <Text style={styles.actionBulletText}>{sol}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <Pressable
+              onPress={() => setWorkflowState('EXPLORE_LABELS')}
+              style={styles.showARBtn}
+            >
+              <Sparkles color="#FBBF24" size={16} />
+              <Text style={styles.showARBtnText}>Show me on AR</Text>
+            </Pressable>
+          </ScrollView>
+        </Animated.View>
+      );
+
+    case 'GUIDE_MODE': {
+      const currentStep = guideSteps[activeStepIndex];
+      return (
+        <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.contentContainer}>
+          <View style={styles.detailsHeader}>
+            <Text style={styles.detailsPartTitle}>Step {activeStepIndex + 1} of {guideSteps.length}</Text>
+            <Text style={styles.indexIndicator}>{activeStepIndex + 1} / {guideSteps.length}</Text>
+          </View>
+          
+          <Text style={styles.guideStepTitle}>{currentStep?.title}</Text>
+          <Text style={styles.detailsDesc}>{currentStep?.description}</Text>
+          
+          <View style={styles.statusDivider} />
+
+          <View style={styles.buttonRow}>
+            <Pressable
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                prevStep();
+              }}
+              style={({ pressed }) => [styles.btnSecondary, pressed && styles.pressed, activeStepIndex === 0 && { opacity: 0.4 }]}
+              disabled={activeStepIndex === 0}
+            >
+              <Text style={styles.btnSecondaryText}>Back</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                nextStep();
+              }}
+              style={({ pressed }) => [styles.btnPrimary, pressed && styles.pressed]}
+            >
+              <Text style={styles.btnPrimaryText}>Next</Text>
+            </Pressable>
+          </View>
+        </Animated.View>
+      );
+    }
+
+    case 'COMPLETED':
+      return (
+        <Animated.View entering={FadeIn} style={styles.contentContainer}>
+          <View style={[styles.checkCircle, { alignSelf: 'center', width: 48, height: 48, borderRadius: 24, backgroundColor: '#10B981', marginBottom: 12 }]}>
+            <CheckCircle color="#fff" size={24} />
+          </View>
+          <Text style={[styles.deviceNameText, { textAlign: 'center' }]}>Task Completed</Text>
+          <Text style={[styles.descText, { textAlign: 'center', marginBottom: 20 }]}>
+            All guided steps for the AC Induction Motor have been completed.
+          </Text>
+          <Pressable
+            onPress={reset}
+            style={({ pressed }) => [styles.btnPrimary, { width: '100%' }, pressed && styles.pressed]}
+          >
+            <Text style={styles.btnPrimaryText}>Done & Reset</Text>
+          </Pressable>
+        </Animated.View>
+      );
+
+    default:
+      return null;
+  }
+}
+
+interface HazardSheetProps {
+  audioRecorder: any;
+  recorderState: any;
+  isTranscribing: boolean;
+  setIsTranscribing: (val: boolean) => void;
+}
+
+export function HazardSheet({
+  audioRecorder,
+  recorderState,
+  isTranscribing,
+  setIsTranscribing,
+}: HazardSheetProps) {
+  const { workflowState } = useWorkflowStore();
+  const sheetRef = useRef<BottomSheetGorhom>(null);
+
+  const isVisible = workflowState !== 'READY' && workflowState !== 'SCANNING';
+  const snapPoints = ['35%', '85%'];
 
   useEffect(() => {
     if (isVisible) {
-      slideX.value = withSpring(0, { damping: 20, stiffness: 200 });
-      setSheetSnapIndex(2);
+      sheetRef.current?.expand();
     } else {
-      slideX.value = withTiming(panelW, { duration: 260 });
-      setSheetSnapIndex(-1);
+      sheetRef.current?.close();
     }
-  }, [isVisible]);
-
-  const panelStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: slideX.value }],
-  }));
-
-  const isAnalyzing = workflowState === 'ANALYZING';
-
-  if (!isVisible) return null;
-
-  let color = '#fff';
-  let riskLabel = '';
-  let allDone = false;
-  if (selectedHazard) {
-    color = RISK_COLOR[selectedHazard.riskLevel];
-    riskLabel = RISK_LABEL[selectedHazard.riskLevel];
-    allDone = selectedHazard.actions.every((a) => completedStepIds.has(a.id));
-  }
+  }, [isVisible, workflowState]);
 
   return (
-    <Animated.View
-      style={[
-        styles.landscapePanel,
-        { width: panelW, paddingTop: insets.top, paddingBottom: insets.bottom, paddingRight: insets.right },
-        panelStyle,
-      ]}
-      pointerEvents={isVisible ? 'auto' : 'none'}
+    <BottomSheetGorhom
+      ref={sheetRef}
+      index={isVisible ? 0 : -1}
+      snapPoints={snapPoints}
+      backgroundComponent={CustomBackground}
+      handleIndicatorStyle={styles.handle}
+      style={styles.sheet}
+      enablePanDownToClose={true}
     >
-      <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(11,12,18,0.5)' }]} />
-      <View style={styles.landscapeHandle} />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {isAnalyzing || !selectedHazard ? (
-          <SkeletonBody />
-        ) : (
-          <SheetBody
-            hazard={selectedHazard}
-            color={color}
-            riskLabel={riskLabel}
-            completedStepIds={completedStepIds}
-            toggleStep={toggleStep}
-            allDone={allDone}
-            isExpanded={true}
-            onExpand={openSheet}
-          />
-        )}
-      </ScrollView>
-    </Animated.View>
+      <BottomSheetScrollView contentContainerStyle={styles.scrollContent}>
+        <SheetBody
+          audioRecorder={audioRecorder}
+          recorderState={recorderState}
+          isTranscribing={isTranscribing}
+          setIsTranscribing={setIsTranscribing}
+        />
+      </BottomSheetScrollView>
+    </BottomSheetGorhom>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Main export — orientation-aware
-// ─────────────────────────────────────────────────────────────────
-export function HazardSheet() {
-  const { width, height } = useWindowDimensions();
-  const isLandscape = width > height;
-  return isLandscape ? <LandscapePanel /> : <PortraitSheet />;
-}
-
-// ─────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   sheet: {
     shadowColor: '#000',
@@ -524,13 +761,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.65,
     shadowRadius: 28,
     elevation: 28,
-    // High zIndex — above hazard selector pills (zIndex 50)
     zIndex: 1000,
-  },
-  sheetBg: {
-    backgroundColor: 'rgba(11,12,18,0.98)',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
   },
   handle: {
     backgroundColor: 'rgba(255,255,255,0.22)',
@@ -541,236 +772,373 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 22,
     paddingTop: 8,
-    paddingBottom: 52,
+    paddingBottom: 40,
   },
-
-  // Arrow indicator (minimized state)
-  arrowBtn: {
-    position: 'absolute',
-    alignSelf: 'center',
-    zIndex: 60,
-    width: 52,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
+  contentContainer: {
+    paddingVertical: 12,
   },
-  arrowInner: {
-    backgroundColor: 'rgba(30,30,40,0.85)',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-
-  // Landscape
-  landscapePanel: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    overflow: 'hidden',
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.07)',
-    zIndex: 1000,
-  },
-  landscapeHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'center',
-    marginVertical: 10,
-  },
-
-  // Sheet content
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  aiLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.45)',
-  },
-  riskBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 99,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  riskBadgeText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  riskDiamond: {
-    width: 8,
-    height: 8,
-    transform: [{ rotate: '45deg' }],
-    borderRadius: 1,
-  },
-  title: {
-    fontSize: 28,
+  deviceNameText: {
+    fontSize: 22,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: -0.4,
-    lineHeight: 34,
     marginBottom: 4,
   },
-  subtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.45)',
-    marginBottom: 16,
-    lineHeight: 20,
+  confidenceText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#34D399',
+    marginBottom: 12,
   },
-  tagsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
+  descText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: 20,
     marginBottom: 20,
   },
-  chip: {
+  buttonRow: {
     flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  btnPrimary: {
+    flex: 1,
+    backgroundColor: '#10B981',
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    justifyContent: 'center',
+  },
+  btnPrimaryText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  btnSecondary: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnSecondaryText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  pressed: {
+    opacity: 0.75,
+  },
+  pillLabelRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  pillLabel: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 99,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  chipDot: {
+  pillLabelText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  titleText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -0.4,
+    marginBottom: 4,
+  },
+  subtitleText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.45)',
+    marginBottom: 20,
+  },
+  modeOptions: {
+    gap: 12,
+  },
+  modeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  modeIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeTextContainer: {
+    flex: 1,
+  },
+  modeCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  modeCardDesc: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  detailsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  detailsPartTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  indexIndicator: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  detailsDesc: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  statusDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 16,
+  },
+  detailsFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#ef4444',
   },
-  chipText: {
+  statusText: {
     fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
     fontWeight: '600',
-    color: '#fff',
   },
-  nextStepBtn: {
+  arrowControls: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 16,
+    gap: 8,
+  },
+  controlArrowBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-  },
-  nextStepIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(74,222,128,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nextStepText: {
-    fontSize: 16,
+  // Voice UI
+  voiceWrapper: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    position: 'relative',
+  },
+  voiceClose: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  soundwaveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    height: 50,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  soundwaveBar: {
+    width: 3,
+    borderRadius: 1.5,
+  },
+  voiceHeader: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#fff',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    marginVertical: 18,
-  },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: 'rgba(255,255,255,0.35)',
-    letterSpacing: 1.5,
+    color: 'rgba(255,255,255,0.4)',
     textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  voiceBigText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+    textAlign: 'center',
     marginBottom: 4,
   },
-  sectionSub: {
+  voiceSubtext: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.4)',
-    marginBottom: 14,
-    lineHeight: 18,
+    marginBottom: 24,
   },
-  warningBlock: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-    padding: 14,
+  micCircleButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  responseScroll: {
+    width: '100%',
+    maxHeight: 280,
+  },
+  responseContent: {
+    paddingBottom: 16,
+  },
+  responseText: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.85)',
+    lineHeight: 22,
     marginBottom: 16,
   },
-  warningText: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.5)',
-    lineHeight: 19,
-  },
-  stepsWrap: {
+  actionList: {
     gap: 10,
     marginBottom: 20,
   },
-  stepCard: {
+  actionBullet: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 14,
-    gap: 12,
+    gap: 8,
   },
-  stepNum: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+  actionBulletText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  showARBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
-  },
-  stepNumText: { fontSize: 13, fontWeight: '700' },
-  stepBody: { flex: 1, gap: 2 },
-  stepTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  stepTitle: { fontSize: 14, fontWeight: '600', color: '#fff', flex: 1 },
-  urgentTag: {
-    backgroundColor: 'rgba(239,68,68,0.18)',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  urgentText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#f87171',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  arPinBadge: {
-    backgroundColor: 'rgba(96,165,250,0.12)',
-    borderRadius: 8,
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.25)',
-    padding: 5,
-    marginRight: 4,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingVertical: 12,
+    width: '100%',
   },
-  stepSub: { fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 17 },
-  stepTime: { fontSize: 10, color: 'rgba(255,255,255,0.28)', marginTop: 3 },
-  completionBanner: {
+  showARBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  guideStepTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  checkCircle: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  troubleshootSection: {
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.22)',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginVertical: 12,
+    gap: 8,
+  },
+  troubleshootHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(74,222,128,0.09)',
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.22)',
+    gap: 8,
   },
-  completionText: { fontSize: 14, fontWeight: '600', color: '#4ade80' },
+  troubleshootTitle: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  troubleshootIssue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  troubleshootSummary: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  troubleshootGroup: {
+    marginTop: 6,
+    gap: 4,
+  },
+  troubleshootSubheading: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  troubleshootBullet: {
+    color: '#fff',
+    fontSize: 13,
+    lineHeight: 18,
+    paddingLeft: 4,
+  },
+  troubleshootMicRow: {
+    marginTop: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  troubleshootMicBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  troubleshootMicBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });

@@ -73,12 +73,22 @@ export const useARTrackingStore = create<ARTrackingState>((set, get) => ({
   // Called once after VLM response arrives — initializes all tracked targets.
   // VLM box is also the initial liveBox and smoothedBox.
   initFromVLM: (spatialTargets) => {
-    const targets: TrackedTarget[] = spatialTargets.map((t) => {
+    const seenIds = new Set<string>();
+    const targets: TrackedTarget[] = [];
+    
+    (spatialTargets || []).forEach((t, index) => {
       // VLM sometimes returns 0-1000 instead of 0.0-1.0
       // Fallback to [0,0,0,0] if box_2d is missing to prevent map crashes
       const box = (t.box_2d || [0,0,0,0]).map(v => v > 1 ? v / 1000 : v);
-      return {
-        id:             t.id,
+      
+      let targetId = t.id ? String(t.id).trim() : `tgt_${index}`;
+      if (!targetId || seenIds.has(targetId)) {
+        targetId = `${targetId || 'tgt'}_${index}`;
+      }
+      seenIds.add(targetId);
+
+      targets.push({
+        id:             targetId,
         hazard_ref:     t.hazard_ref,
         label:          t.label,
         type:           t.type,
@@ -93,7 +103,7 @@ export const useARTrackingStore = create<ARTrackingState>((set, get) => ({
         boxSV:          makeMutable([...box]),
         lostFrames:     0,
         isLost:         false,
-      };
+      });
     });
     set({ targets, disclosureLevel: 'DETECTION' });
   },
@@ -166,5 +176,12 @@ export const useARTrackingStore = create<ARTrackingState>((set, get) => ({
 
   setDisclosureLevel: (disclosureLevel) => set({ disclosureLevel }),
   setChatFocusTarget: (chatFocusTargetId) => set({ chatFocusTargetId }),
-  clear: () => set({ targets: [], disclosureLevel: 'DETECTION', chatFocusTargetId: null }),
+  clear: () => {
+    arOffsetX.value = 0;
+    arOffsetY.value = 0;
+    set({ targets: [], disclosureLevel: 'DETECTION', chatFocusTargetId: null });
+  },
 }));
+
+export const arOffsetX = makeMutable(0);
+export const arOffsetY = makeMutable(0);

@@ -25,7 +25,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "package": "com.chirag_jain.fixsighttemp"
     },
@@ -48,13 +49,15 @@
       ],
       "react-native-fast-tflite",
       "expo-sqlite",
-      "expo-router"
+      "expo-router",
+      "expo-asset"
     ],
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "87ad0149-0bb0-4b9e-ba42-69260fc5955b"
+        "projectId": "b971f202-a995-4dc9-9646-676b9a836c24"
       }
-    }
+    },
+    "owner": "yugsheth1"
   }
 }

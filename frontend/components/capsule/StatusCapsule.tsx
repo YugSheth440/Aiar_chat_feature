@@ -6,149 +6,179 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
-  withSpring,
   FadeIn,
+  FadeOut,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
-import { RotateCcw } from 'lucide-react-native';
-import { useWorkflowStore, WorkflowState } from '../../store/workflowStore';
-import { useWsStore } from '../../store/wsStore';
+import { RotateCcw, ChevronLeft, ScanFace, Check, Sun } from 'lucide-react-native';
+import { useWorkflowStore } from '../../store/workflowStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type StateConfig = {
-  dot: string;
-  label: string;
-  pulse: boolean;
-  borderColor: string;
-  bgColor: string;
-};
-
-const CONFIG: Record<WorkflowState, StateConfig> = {
-  READY: {
-    dot: '#4ade80',
-    label: 'Ready',
-    pulse: false,
-    borderColor: 'rgba(255,255,255,0.15)',
-    bgColor: 'rgba(10,10,16,0.82)',
-  },
-  ANALYZING: {
-    dot: '#60a5fa',
-    label: 'Analyzing...',
-    pulse: true,
-    borderColor: 'rgba(96,165,250,0.4)',
-    bgColor: 'rgba(10,10,16,0.82)',
-  },
-  HAZARDS_DISCOVERED: {
-    dot: '#fbbf24',
-    label: 'Hazard Detected',
-    pulse: false,
-    borderColor: 'rgba(255,255,255,0.15)',
-    bgColor: 'rgba(10,10,16,0.88)',
-  },
-  HAZARD_FOCUSED: {
-    dot: '#ef4444',
-    label: 'Critical Alert',
-    pulse: true,
-    borderColor: 'rgba(239,68,68,0.5)',
-    bgColor: 'rgba(10,10,16,0.92)',
-  },
-  SHEET_OPEN: {
-    dot: '#ef4444',
-    label: 'Critical Alert',
-    pulse: true,
-    borderColor: 'rgba(239,68,68,0.5)',
-    bgColor: 'rgba(10,10,16,0.92)',
-  },
-};
-
 export function StatusCapsule() {
-  const { workflowState, selectedHazard, reset } = useWorkflowStore();
-  const wsStatus = useWsStore((s) => s.wsStatus);
+  const {
+    workflowState,
+    deviceName,
+    deviceConfidence,
+    components,
+    activeComponentIndex,
+    activeStepIndex,
+    guideSteps,
+    reset,
+    setWorkflowState,
+    selectMode,
+  } = useWorkflowStore();
   const insets = useSafeAreaInsets();
-  const cfg = CONFIG[workflowState];
-
-  // Show a transient WS status badge when not connected
-  const showWsWarning = wsStatus === 'connecting' || wsStatus === 'reconnecting' || wsStatus === 'offline';
-
-  // Override label from selected hazard when applicable
-  const label =
-    (workflowState === 'HAZARD_FOCUSED' || workflowState === 'SHEET_OPEN') && selectedHazard
-      ? selectedHazard.riskLevel === 'CRITICAL' || selectedHazard.riskLevel === 'HIGH'
-        ? 'Critical Alert'
-        : 'Hazard Detected'
-      : cfg.label;
-
-  const dotColor =
-    (workflowState === 'HAZARD_FOCUSED' || workflowState === 'SHEET_OPEN') && selectedHazard
-      ? selectedHazard.riskLevel === 'CRITICAL' || selectedHazard.riskLevel === 'HIGH'
-        ? '#ef4444'
-        : '#fbbf24'
-      : cfg.dot;
 
   const pulseScale = useSharedValue(1);
-  const pulseOp = useSharedValue(0);
+  const pulseOp = useSharedValue(0.4);
+
+  const isAnalyzing = workflowState === 'SCANNING';
 
   useEffect(() => {
-    if (cfg.pulse) {
-      pulseScale.value = withRepeat(withTiming(2.2, { duration: 800 }), -1);
+    if (isAnalyzing) {
+      pulseScale.value = withRepeat(withTiming(2, { duration: 800 }), -1);
       pulseOp.value = withRepeat(
-        withSequence(withTiming(0.55, { duration: 100 }), withTiming(0, { duration: 700 })),
+        withSequence(withTiming(0.6, { duration: 100 }), withTiming(0, { duration: 700 })),
         -1
       );
     } else {
-      pulseScale.value = withTiming(1);
-      pulseOp.value = withTiming(0);
+      pulseScale.value = 1;
+      pulseOp.value = 0;
     }
-  }, [cfg.pulse]);
+  }, [isAnalyzing]);
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
     opacity: pulseOp.value,
   }));
 
-  const showReset =
-    workflowState !== 'READY' && workflowState !== 'ANALYZING';
+  const handleBack = () => {
+    if (workflowState === 'SCANNING' || workflowState === 'READY') {
+      reset();
+    } else if (workflowState === 'IDENTIFIED') {
+      setWorkflowState('READY');
+    } else if (workflowState === 'MODE_SELECTION') {
+      setWorkflowState('IDENTIFIED');
+    } else if (workflowState === 'EXPLORE_LABELS') {
+      setWorkflowState('MODE_SELECTION');
+    } else if (workflowState === 'GUIDE_MODE') {
+      setWorkflowState('MODE_SELECTION');
+    } else if (workflowState === 'VOICE_ACTIVE' || workflowState === 'VOICE_SPEAKING') {
+      setWorkflowState('MODE_SELECTION');
+    } else {
+      reset();
+    }
+  };
+
+  const renderContent = () => {
+    switch (workflowState) {
+      case 'READY':
+        return (
+          <View style={styles.capsule}>
+            <View style={styles.dotWrap}>
+              <View style={[styles.dot, { backgroundColor: '#10B981' }]} />
+            </View>
+            <Text style={styles.label}>Ready</Text>
+            <View style={styles.iconBtn}>
+              <Sun color="rgba(255,255,255,0.7)" size={14} />
+            </View>
+          </View>
+        );
+
+      case 'SCANNING':
+        return (
+          <View style={styles.capsule}>
+            <View style={styles.dotWrap}>
+              <Animated.View style={[styles.dotPulse, { backgroundColor: '#10B981' }, pulseStyle]} />
+              <View style={[styles.dot, { backgroundColor: '#10B981' }]} />
+            </View>
+            <Text style={styles.label}>Analyzing...</Text>
+            <View style={styles.iconBtn}>
+              <Sun color="rgba(255,255,255,0.7)" size={14} />
+            </View>
+          </View>
+        );
+
+      case 'IDENTIFIED':
+        return (
+          <View style={[styles.capsule, { borderColor: 'rgba(16,185,129,0.3)' }]}>
+            <View style={[styles.checkCircle, { backgroundColor: '#10B981' }]}>
+              <Check color="#fff" size={10} strokeWidth={3} />
+            </View>
+            <Text style={styles.label}>Identified</Text>
+          </View>
+        );
+
+      case 'MODE_SELECTION':
+        return (
+          <View style={styles.capsule}>
+            <Text style={styles.label}>{deviceName}</Text>
+            <View style={styles.confBadge}>
+              <Text style={styles.confText}>{deviceConfidence}% Confidence</Text>
+            </View>
+          </View>
+        );
+
+      case 'EXPLORE_LABELS': {
+        const activePart = components[activeComponentIndex];
+        return (
+          <View style={styles.exploreWrapper}>
+            {/* Top Left Back Button */}
+            <Pressable onPress={handleBack} style={styles.roundBtn}>
+              <ChevronLeft color="#fff" size={20} />
+            </Pressable>
+
+            {/* Center active part tag if any */}
+            {activePart && (
+              <View style={[styles.capsule, { borderColor: 'rgba(255,255,255,0.1)' }]}>
+                <Text style={styles.label}>{activePart.label}</Text>
+              </View>
+            )}
+
+            {/* Top Right AR Focus Toggle */}
+            <Pressable onPress={() => {}} style={styles.roundBtn}>
+              <ScanFace color="#fff" size={20} />
+            </Pressable>
+          </View>
+        );
+      }
+
+      case 'GUIDE_MODE':
+        return (
+          <View style={styles.exploreWrapper}>
+            <Pressable onPress={handleBack} style={styles.roundBtn}>
+              <ChevronLeft color="#fff" size={20} />
+            </Pressable>
+            <View style={styles.capsule}>
+              <Text style={styles.label}>Step {activeStepIndex + 1} of {guideSteps.length}</Text>
+            </View>
+            <Pressable onPress={() => {}} style={styles.roundBtn}>
+              <ScanFace color="#fff" size={20} />
+            </Pressable>
+          </View>
+        );
+
+      default:
+        return (
+          <View style={styles.capsule}>
+            <Text style={styles.label}>{deviceName}</Text>
+          </View>
+        );
+    }
+  };
 
   return (
     <Animated.View
-      entering={FadeIn.duration(400)}
-      style={[styles.wrapper, { top: Math.max(insets.top, 30) + 12 }]}
+      entering={FadeIn.duration(300)}
+      style={[
+        styles.wrapper,
+        { top: Math.max(insets.top, 30) + 12 },
+        (workflowState === 'EXPLORE_LABELS' || workflowState === 'GUIDE_MODE') && { width: '90%', alignSelf: 'center' }
+      ]}
     >
-      {/* Main capsule */}
-      <BlurView
-        intensity={70}
-        tint="dark"
-        style={[styles.capsule, { borderColor: cfg.borderColor, backgroundColor: cfg.bgColor }]}
-      >
-        {/* Dot with pulse */}
-        <View style={styles.dotWrap}>
-          <Animated.View style={[styles.dotPulse, { backgroundColor: dotColor }, pulseStyle]} />
-          <View style={[styles.dot, { backgroundColor: dotColor }]} />
-        </View>
-        <Text style={styles.label}>{label}</Text>
-
-        {/* Sun / brightness icon — decorative in reference */}
-        <View style={styles.iconBtn}>
-          <Text style={styles.iconText}>☀</Text>
-        </View>
+      <BlurView intensity={40} tint="dark" style={styles.blurWrap}>
+        {renderContent()}
       </BlurView>
-
-      {/* Camera rotate icon — top right (from reference images) */}
-      {showReset && (
-        <Pressable onPress={reset} style={styles.resetBtn} hitSlop={8}>
-          <BlurView intensity={60} tint="dark" style={styles.resetBlur}>
-            <RotateCcw color="rgba(255,255,255,0.8)" size={16} strokeWidth={2.2} />
-          </BlurView>
-        </Pressable>
-      )}
-      {showWsWarning && (
-        <View style={styles.wsBadge}>
-          <View style={[styles.wsDot, { backgroundColor: wsStatus === 'offline' ? '#ef4444' : '#fbbf24' }]} />
-          <Text style={styles.wsText}>
-            {wsStatus === 'offline' ? 'Offline' : 'Connecting…'}
-          </Text>
-        </View>
-      )}
     </Animated.View>
   );
 }
@@ -158,19 +188,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignSelf: 'center',
     zIndex: 100,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  },
+  blurWrap: {
+    borderRadius: 99,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(15,18,25,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   capsule: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingLeft: 14,
-    paddingRight: 6,
-    paddingVertical: 10,
-    borderRadius: 99,
-    borderWidth: 1,
-    overflow: 'hidden',
+    paddingRight: 10,
+    paddingVertical: 8,
     gap: 8,
   },
   dotWrap: {
@@ -186,61 +217,61 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   dot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  checkCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
   },
   iconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+  },
+  confBadge: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  confText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#34D399',
+  },
+  exploreWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    gap: 12,
+  },
+  roundBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  resetBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  resetBlur: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(10,10,16,0.7)',
-  },
-  wsBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 99,
-    backgroundColor: 'rgba(10,10,16,0.8)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  wsDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  wsText: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.75)',
-    fontWeight: '500',
-  },
 });
+

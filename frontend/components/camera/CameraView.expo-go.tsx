@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { CameraView as ExpoCamera, useCameraPermissions } from 'expo-camera';
 import Animated, {
@@ -14,6 +14,8 @@ import { useWorkflowStore } from '../../store/workflowStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useWsStore } from '../../store/wsStore';
 import { AROverlayLayer } from '../ar/AROverlayLayer';
+import { Gyroscope } from 'expo-sensors';
+import { arOffsetX, arOffsetY } from '../../store/arTrackingStore';
 
 // ── Futuristic Scanning Laser Component (Video-Analysis Illusion) ─────────────
 function ScanningLaser({ active }: { active: boolean }) {
@@ -66,21 +68,18 @@ export function CameraView() {
 
   const localCameraRef = useRef<any>(null);
 
-  // Sync camera reference with store, wrapping it with JSI-compatible adapters
-  useEffect(() => {
-    if (localCameraRef.current) {
+  const onCameraRef = useCallback((ref: any) => {
+    localCameraRef.current = ref;
+    if (ref) {
       const adapterRef = {
-        // Mock method to make AskAIButton call compatible with expo-camera
         takePhoto: async (options?: any) => {
           console.log('[FixSight] JSI Adapter: Capturing frame for Ask AI...');
-          const photo = await localCameraRef.current.takePictureAsync({
+          const photo = await ref.takePictureAsync({
             quality: 0.5,
             skipProcessing: true,
             shutterSound: false,
           });
           if (!photo) throw new Error('Failed to capture image in Expo Go adapter');
-          
-          // Strip "file://" so that fetch('file://' + photo.path) works perfectly in AskAIButton
           const cleanPath = photo.uri.replace('file://', '');
           return {
             path: cleanPath,
@@ -88,11 +87,10 @@ export function CameraView() {
         },
       };
       setCameraRef(adapterRef);
-    }
-    return () => {
+    } else {
       setCameraRef(null);
-    };
-  }, [localCameraRef.current, setCameraRef]);
+    }
+  }, [setCameraRef]);
 
   // Request permissions on mount
   useEffect(() => {
@@ -100,6 +98,27 @@ export function CameraView() {
       requestPermission();
     }
   }, [permission, requestPermission]);
+
+  // Gyroscope tracking for dynamic camera-motion based AR overlays on Expo Go
+  useEffect(() => {
+    let subscription: any = null;
+    Gyroscope.setUpdateInterval(16); // ~60Hz update rate
+    
+    subscription = Gyroscope.addListener((data) => {
+      // Scale factor to map angular velocity (rad/s) to screen pixels
+      const scale = 500;
+      
+      // Pitch/Yaw updates to offset camera motion
+      arOffsetX.value = arOffsetX.value - (data.y * 0.016) * scale;
+      arOffsetY.value = arOffsetY.value + (data.x * 0.016) * scale;
+    });
+
+    return () => {
+      if (subscription) subscription.remove();
+      arOffsetX.value = 0;
+      arOffsetY.value = 0;
+    };
+  }, []);
 
   // Watchdog timer (similar to original Vision Camera setup)
   useEffect(() => {
@@ -176,7 +195,7 @@ export function CameraView() {
   return (
     <>
       <ExpoCamera
-        ref={localCameraRef}
+        ref={onCameraRef}
         style={StyleSheet.absoluteFill}
         facing={facing}
         enableTorch={torchEnabled}

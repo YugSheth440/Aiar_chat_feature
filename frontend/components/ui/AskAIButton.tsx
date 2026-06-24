@@ -22,12 +22,20 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { MessageCircle, Send, X, Mic } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets } from 'expo-audio';
+import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
+import * as Speech from 'expo-speech';
 import { useChatStore } from '../../store/chatStore';
 import { useWorkflowStore } from '../../store/workflowStore';
 import { useARTrackingStore } from '../../store/arTrackingStore';
 import { ChatBubble } from './ChatBubble';
 import { BACKEND_URL } from '../../src/config';
+
+interface AskAIButtonProps {
+  audioRecorder: any;
+  recorderState: any;
+  isTranscribing: boolean;
+  setIsTranscribing: (val: boolean) => void;
+}
 
 /**
  * AskAIButton — on-demand chat entry point (Phase 5).
@@ -40,7 +48,12 @@ import { BACKEND_URL } from '../../src/config';
  *
  * Does NOT appear during ANALYZING state (main workflow takes priority).
  */
-export function AskAIButton() {
+export function AskAIButton({
+  audioRecorder,
+  recorderState,
+  isTranscribing,
+  setIsTranscribing,
+}: AskAIButtonProps) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const workflowState = useWorkflowStore((s) => s.workflowState);
@@ -51,31 +64,29 @@ export function AskAIButton() {
   const [inputText, setInputText] = useState('');
   const inputRef = useRef<TextInput>(null);
 
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recorderState = useAudioRecorderState(audioRecorder);
-
   const handleMicPress = async () => {
     if (isTranscribing) return;
 
     if (!recorderState.isRecording) {
       try {
-        const permission = await AudioModule.getRecordingPermissionsAsync();
+        const permission = await getRecordingPermissionsAsync();
         if (!permission.granted) {
-          const request = await AudioModule.requestRecordingPermissionsAsync();
+          const request = await requestRecordingPermissionsAsync();
           if (!request.granted) {
             alert('Microphone permission is required to record audio.');
             return;
           }
         }
 
-        await AudioModule.setAudioModeAsync({
+        await setAudioModeAsync({
           playsInSilentMode: true,
           allowsRecording: true,
         });
 
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        await audioRecorder.prepareToRecordAsync();
+        if (!recorderState.canRecord) {
+          await audioRecorder.prepareToRecordAsync();
+        }
         await audioRecorder.record();
       } catch (err) {
         console.error('Failed to start recording:', err);
@@ -105,7 +116,6 @@ export function AskAIButton() {
           body: formData,
           headers: {
             'Accept': 'application/json',
-            'Content-Type': 'multipart/form-data',
           },
         });
 
@@ -131,7 +141,7 @@ export function AskAIButton() {
   };
 
   // Don't show during analysis — focus on the main safety workflow
-  if (workflowState === 'ANALYZING' || workflowState === 'READY') return null;
+  if (workflowState === 'SCANNING' || workflowState === 'READY') return null;
 
   const handleOpen = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -140,6 +150,7 @@ export function AskAIButton() {
   };
 
   const handleClose = () => {
+    Speech.stop();
     close();
     setInputText('');
   };
@@ -148,6 +159,7 @@ export function AskAIButton() {
     const text = inputText.trim();
     if (!text || isTyping) return;
 
+    Speech.stop();
     setInputText('');
     close();
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -195,6 +207,60 @@ export function AskAIButton() {
           const chatReply = data.chat_reply || data.summary || '';
           useChatStore.getState().addAssistantMessage(chatReply, data.chat_focus_target_id ?? null);
           useChatStore.getState().setTyping(false);
+
+          // Voice-assisted transitions based on user voice text
+          const lowercaseText = text.toLowerCase();
+          const workflowStore = useWorkflowStore.getState();
+
+          // 1. Mode selection
+          if (lowercaseText.includes('troubleshoot') || lowercaseText.includes('diagnose')) {
+            workflowStore.selectMode('troubleshoot');
+          } else if (lowercaseText.includes('explain') || lowercaseText.includes('explore')) {
+            workflowStore.selectMode('explain');
+          } else if (lowercaseText.includes('guide') || lowercaseText.includes('procedure') || lowercaseText.includes('step-by-step') || lowercaseText.includes('step by step')) {
+            workflowStore.selectMode('guide');
+          }
+
+          // 2. Navigation
+          if (lowercaseText.includes('next') || lowercaseText.includes('forward')) {
+            if (workflowStore.activeMode === 'guide') {
+              workflowStore.nextStep();
+            } else {
+              workflowStore.nextComponent();
+            }
+          } else if (
+            lowercaseText.includes('prev') ||
+            lowercaseText.includes('back') ||
+            lowercaseText.includes('previous')
+          ) {
+            if (workflowStore.activeMode === 'guide') {
+              workflowStore.prevStep();
+            } else {
+              workflowStore.prevComponent();
+            }
+          }
+
+          // 3. Highlighting component target by name or VLM response ID
+          const components = workflowStore.components;
+          let matchedComponentIdx = -1;
+          for (let i = 0; i < components.length; i++) {
+            const comp = components[i];
+            if (
+              lowercaseText.includes(comp.id.toLowerCase()) ||
+              lowercaseText.includes(comp.label.toLowerCase())
+            ) {
+              matchedComponentIdx = i;
+              break;
+            }
+          }
+          if (matchedComponentIdx !== -1) {
+            workflowStore.setActiveComponentIndex(matchedComponentIdx);
+          } else if (data.chat_focus_target_id) {
+            const targetIdx = components.findIndex((c) => c.id === data.chat_focus_target_id);
+            if (targetIdx !== -1) {
+              workflowStore.setActiveComponentIndex(targetIdx);
+            }
+          }
 
         } catch (postError) {
           console.error('[AskAI] HTTP POST failed:', postError);
