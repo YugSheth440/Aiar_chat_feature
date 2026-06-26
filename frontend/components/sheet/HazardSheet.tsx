@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import BottomSheetGorhom, {
   BottomSheetScrollView,
+  TouchableOpacity,
 } from '@gorhom/bottom-sheet';
 import Animated, {
   FadeIn,
@@ -33,19 +34,14 @@ import {
   ArrowLeft,
   ArrowRight,
   Sparkles,
+  Square,
 } from 'lucide-react-native';
 import { useWorkflowStore, ActiveModeType } from '../../store/workflowStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Speech from 'expo-speech';
 import { BACKEND_URL } from '../../src/config';
-import {
-  getRecordingPermissionsAsync,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-} from 'expo-audio';
-import { useChatStore } from '../../store/chatStore';
-import { useARTrackingStore } from '../../store/arTrackingStore';
 import { ActivityIndicator } from 'react-native';
+import { GeminiAssistantBar } from '../ui/AskAIButton';
 
 // ─── Glass Background ─────────────────────────────────────────────
 const CustomBackground = ({ style }: any) => (
@@ -78,12 +74,14 @@ function SoundwaveBar({ color }: { color: string }) {
   );
 }
 
-function SoundwaveVisualizer({ color = '#10B981', count = 5 }) {
+function SoundwaveVisualizer({ count = 9, isMulticolor = false, defaultColor = '#10B981' }) {
+  const geminiColors = ['#4285F4', '#5C6BC0', '#7E57C2', '#AB47BC', '#EC407A', '#AB47BC', '#7E57C2', '#5C6BC0', '#4285F4'];
   return (
     <View style={styles.soundwaveRow}>
-      {Array.from({ length: count }).map((_, i) => (
-        <SoundwaveBar key={i} color={color} />
-      ))}
+      {Array.from({ length: count }).map((_, i) => {
+        const barColor = isMulticolor ? geminiColors[i % geminiColors.length] : defaultColor;
+        return <SoundwaveBar key={i} color={barColor} />;
+      })}
     </View>
   );
 }
@@ -152,173 +150,6 @@ function SheetBody({
     loadVoices();
   }, []);
 
-  const startRecording = async () => {
-    try {
-      const permission = await getRecordingPermissionsAsync();
-      if (!permission.granted) {
-        const request = await requestRecordingPermissionsAsync();
-        if (!request.granted) {
-          alert('Microphone permission is required to record audio.');
-          setWorkflowState('MODE_SELECTION');
-          return;
-        }
-      }
-
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        allowsRecording: true,
-      });
-
-      if (!recorderState.canRecord) {
-        await audioRecorder.prepareToRecordAsync();
-      }
-      await audioRecorder.record();
-    } catch (err) {
-      console.error('[Voice] Failed to start recording:', err);
-    }
-  };
-
-  const stopListeningAndProcess = async () => {
-    if (isTranscribing) return;
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    if (!recorderState.isRecording) {
-      startRecording();
-      return;
-    }
-
-    try {
-      setIsTranscribing(true);
-      await audioRecorder.stop();
-      
-      const uri = audioRecorder.uri;
-      if (!uri) {
-        console.error('[Voice] No recording URI found');
-        setIsTranscribing(false);
-        return;
-      }
-
-      const formData = new FormData();
-      formData.append('file', {
-        uri: uri,
-        name: 'audio.m4a',
-        type: 'audio/m4a',
-      } as any);
-
-      console.log('[Voice] Sending audio file to backend /transcribe...');
-      const response = await fetch(`${BACKEND_URL}/transcribe`, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data.text) {
-        const transcribedText = data.text;
-        console.log('[Voice] Transcribed text:', transcribedText);
-        
-        const { lastCapturedImageB64, cameraRef } = useWorkflowStore.getState();
-        let b64 = lastCapturedImageB64;
-        
-        if (!b64 && cameraRef) {
-          try {
-            const photo = await cameraRef.takePhoto({ flash: 'off' });
-            const imgRes = await fetch(`file://${photo.path}`);
-            const blob = await imgRes.blob();
-            const reader = new FileReader();
-            await new Promise<void>((resolve) => {
-              reader.onloadend = () => {
-                b64 = (reader.result as string).split(',')[1];
-                resolve();
-              };
-              reader.readAsDataURL(blob);
-            });
-          } catch (err) {
-            console.error('[Voice] Failed to capture frame during voice request:', err);
-          }
-        }
-        
-        if (!b64) b64 = "";
-
-        const chatRes = await fetch(`${BACKEND_URL}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            full_frame_b64: b64,
-            user_message: transcribedText,
-            session_id: 'default',
-            conversation_history: useChatStore.getState().getHistory(3),
-            device_context: { lighting: 'normal', motion: 'low', device_mode: 'voice_sheet' }
-          })
-        });
-
-        if (chatRes.ok) {
-          const chatData = await chatRes.json();
-          const reply = chatData.chat_reply || chatData.summary || "No response received.";
-          
-          let solutions: string[] = [];
-          if (chatData.general_solutions && chatData.general_solutions.length > 0) {
-            solutions = chatData.general_solutions;
-          } else if (chatData.hazards && chatData.hazards.length > 0 && chatData.hazards[0].guidance?.actions) {
-            solutions = chatData.hazards[0].guidance.actions.map((act: any) => 
-              act.title + (act.subtitle ? ` — ${act.subtitle}` : "")
-            );
-          } else if (chatData.actions && chatData.actions.length > 0) {
-            solutions = chatData.actions;
-          }
-
-          if (chatData.spatial_targets?.length > 0) {
-            useARTrackingStore.getState().initFromVLM(chatData.spatial_targets);
-          }
-          if (chatData.chat_focus_target_id) {
-            useARTrackingStore.getState().setChatFocusTarget(chatData.chat_focus_target_id);
-            const targetIdx = components.findIndex((c) => c.id === chatData.chat_focus_target_id);
-            if (targetIdx !== -1) {
-              setActiveComponentIndex(targetIdx);
-            }
-          }
-          
-          const lowercaseText = transcribedText.toLowerCase();
-          if (lowercaseText.includes('troubleshoot') || lowercaseText.includes('diagnose')) {
-            selectMode('troubleshoot');
-          } else if (lowercaseText.includes('explain') || lowercaseText.includes('explore')) {
-            selectMode('explain');
-          } else if (lowercaseText.includes('guide') || lowercaseText.includes('procedure') || lowercaseText.includes('step-by-step') || lowercaseText.includes('step by step')) {
-            selectMode('guide');
-          }
-          
-          setVoiceSpeakingState(reply, solutions);
-        } else {
-          setVoiceSpeakingState("Sorry, I could not reach the server to answer your question.");
-        }
-      } else {
-        console.warn('[Voice] No text returned from transcription');
-        setVoiceSpeakingState("I couldn't hear what you said. Please try again.");
-      }
-    } catch (err) {
-      console.error('[Voice] Error in voice processing pipeline:', err);
-      setVoiceSpeakingState("There was an error processing your voice command.");
-    } finally {
-      setIsTranscribing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (workflowState === 'VOICE_ACTIVE') {
-      startRecording();
-    }
-    return () => {
-      if (audioRecorder.isRecording) {
-        audioRecorder.stop().catch(() => {});
-      }
-    };
-  }, [workflowState]);
 
   useEffect(() => {
     if (workflowState === 'EXPLORE_LABELS' && components[activeComponentIndex]) {
@@ -339,16 +170,6 @@ function SheetBody({
       });
     }
   }, [activeStepIndex, workflowState]);
-
-  useEffect(() => {
-    if (workflowState === 'VOICE_SPEAKING' && voiceResponseText) {
-      Speech.stop();
-      Speech.speak(voiceResponseText, {
-        voice: selectedVoice,
-        rate: 0.95,
-      });
-    }
-  }, [voiceResponseText, workflowState, selectedVoice]);
 
   useEffect(() => {
     return () => {
@@ -534,24 +355,26 @@ function SheetBody({
                 </View>
 
                 <View style={styles.arrowControls}>
-                  <Pressable
+                  <TouchableOpacity
                     onPress={async () => {
                       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       prevComponent();
                     }}
                     style={styles.controlArrowBtn}
+                    activeOpacity={0.7}
                   >
                     <ArrowLeft color="#fff" size={16} />
-                  </Pressable>
-                  <Pressable
+                  </TouchableOpacity>
+                  <TouchableOpacity
                     onPress={async () => {
                       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       nextComponent();
                     }}
                     style={styles.controlArrowBtn}
+                    activeOpacity={0.7}
                   >
                     <ArrowRight color="#fff" size={16} />
-                  </Pressable>
+                  </TouchableOpacity>
                 </View>
               </View>
             </>
@@ -573,73 +396,14 @@ function SheetBody({
     }
 
     case 'VOICE_ACTIVE':
-      return (
-        <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.voiceWrapper}>
-          <Pressable
-            onPress={() => setWorkflowState('MODE_SELECTION')}
-            style={styles.voiceClose}
-          >
-            <X color="#9CA3AF" size={18} />
-          </Pressable>
-          
-          <SoundwaveVisualizer color="#10B981" count={12} />
-          
-          <Text style={styles.voiceHeader}>Listening...</Text>
-          <Text style={styles.voiceBigText}>How can I help you?</Text>
-          <Text style={styles.voiceSubtext}>
-            {isTranscribing ? "Processing audio..." : "Tap to stop listening"}
-          </Text>
- 
-          <Pressable
-            onPress={stopListeningAndProcess}
-            disabled={isTranscribing}
-            style={[styles.micCircleButton, isTranscribing && { opacity: 0.6 }]}
-          >
-            {isTranscribing ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Mic color="#fff" size={28} strokeWidth={2.5} />
-            )}
-          </Pressable>
-        </Animated.View>
-      );
-
     case 'VOICE_SPEAKING':
       return (
-        <Animated.View entering={FadeIn} style={styles.voiceWrapper}>
-          <Pressable
-            onPress={() => setWorkflowState('MODE_SELECTION')}
-            style={styles.voiceClose}
-          >
-            <X color="#9CA3AF" size={18} />
-          </Pressable>
-
-          <SoundwaveVisualizer color="#EF4444" count={8} />
-
-          <Text style={styles.voiceHeader}>Speaking...</Text>
-          <ScrollView style={styles.responseScroll} contentContainerStyle={styles.responseContent}>
-            <Text style={styles.responseText}>{voiceResponseText}</Text>
-            
-            {voiceSolutions && voiceSolutions.length > 0 && (
-              <View style={styles.actionList}>
-                {voiceSolutions.map((sol, idx) => (
-                  <View key={idx} style={styles.actionBullet}>
-                    <CheckCircle color="#10B981" size={16} />
-                    <Text style={styles.actionBulletText}>{sol}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            <Pressable
-              onPress={() => setWorkflowState('EXPLORE_LABELS')}
-              style={styles.showARBtn}
-            >
-              <Sparkles color="#FBBF24" size={16} />
-              <Text style={styles.showARBtnText}>Show me on AR</Text>
-            </Pressable>
-          </ScrollView>
-        </Animated.View>
+        <GeminiAssistantBar
+          audioRecorder={audioRecorder}
+          recorderState={recorderState}
+          isTranscribing={isTranscribing}
+          setIsTranscribing={setIsTranscribing}
+        />
       );
 
     case 'GUIDE_MODE': {
@@ -721,12 +485,17 @@ export function HazardSheet({
   const { workflowState } = useWorkflowStore();
   const sheetRef = useRef<BottomSheetGorhom>(null);
 
-  const isVisible = workflowState !== 'READY' && workflowState !== 'SCANNING';
-  const snapPoints = ['35%', '85%'];
+  const isVisible = workflowState !== 'READY' &&
+                    workflowState !== 'SCANNING';
+  const snapPoints = ['10%', '35%', '85%'];
 
   useEffect(() => {
     if (isVisible) {
-      sheetRef.current?.expand();
+      if (workflowState === 'VOICE_ACTIVE' || workflowState === 'VOICE_SPEAKING') {
+        sheetRef.current?.snapToIndex(2);
+      } else {
+        sheetRef.current?.snapToIndex(1);
+      }
     } else {
       sheetRef.current?.close();
     }
@@ -735,12 +504,12 @@ export function HazardSheet({
   return (
     <BottomSheetGorhom
       ref={sheetRef}
-      index={isVisible ? 0 : -1}
+      index={isVisible ? 1 : -1}
       snapPoints={snapPoints}
       backgroundComponent={CustomBackground}
       handleIndicatorStyle={styles.handle}
       style={styles.sheet}
-      enablePanDownToClose={true}
+      enablePanDownToClose={false}
     >
       <BottomSheetScrollView contentContainerStyle={styles.scrollContent}>
         <SheetBody
@@ -974,14 +743,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 6,
     height: 50,
     marginTop: 8,
     marginBottom: 12,
   },
   soundwaveBar: {
-    width: 3,
-    borderRadius: 1.5,
+    width: 4,
+    borderRadius: 2,
   },
   voiceHeader: {
     fontSize: 12,
@@ -1140,5 +909,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+  },
+  voiceActionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
+    width: '100%',
+  },
+  voiceActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingVertical: 12,
   },
 });

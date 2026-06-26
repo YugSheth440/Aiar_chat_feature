@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Hazard, SceneHazard, SpatialTarget, RiskLevel, ActionStep } from '../src/types';
 import { BACKEND_URL } from '../src/config';
 import { useARTrackingStore } from './arTrackingStore';
+import * as Speech from 'expo-speech';
 
 export type WorkflowState =
   | 'READY'
@@ -355,9 +356,13 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   setScanningProgress: (scanningProgress) => set({ scanningProgress }),
-  setWorkflowState: (workflowState) => set({ workflowState }),
+  setWorkflowState: (workflowState) => {
+    Speech.stop();
+    set({ workflowState });
+  },
 
   confirmDevice: (confirmed) => {
+    Speech.stop();
     if (confirmed) {
       set({ workflowState: 'MODE_SELECTION' });
     } else {
@@ -367,6 +372,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   selectMode: async (activeMode) => {
+    Speech.stop();
     if (activeMode === 'explain') {
       set({ activeMode, workflowState: 'EXPLORE_LABELS', activeComponentIndex: 0 });
     } else if (activeMode === 'guide') {
@@ -471,6 +477,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setActiveStepIndex: (activeStepIndex) => set({ activeStepIndex }),
 
   setVoiceActiveState: (active) => {
+    Speech.stop();
     if (active) {
       set({ workflowState: 'VOICE_ACTIVE' });
     } else {
@@ -546,6 +553,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   reset: () => {
+    Speech.stop();
     useARTrackingStore.getState().clear();
     set({
       workflowState: 'READY',

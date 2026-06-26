@@ -176,7 +176,7 @@ export function AROverlayLayer() {
   const displayTargets = isSimulated ? virtualTargets : socketTargets;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View style={[StyleSheet.absoluteFill, { zIndex: 10 }]} pointerEvents="box-none">
       {/* 1. Canvas drawing rings and connector lines */}
       <Canvas style={StyleSheet.absoluteFill}>
         {displayTargets.map((target: any) => {

@@ -6,9 +6,9 @@ import { AROverlay } from '../../components/ar/AROverlay';
 import { StatusCapsule } from '../../components/capsule/StatusCapsule';
 import { LeftControls } from '../../components/ui/LeftControls';
 import { HazardSheet } from '../../components/sheet/HazardSheet';
-import { AskAIButton } from '../../components/ui/AskAIButton';
 import { useWsStore } from '../../store/wsStore';
 import { useWorkflowStore, WorkflowState, ActiveModeType } from '../../store/workflowStore';
+import { ChatBubble } from '../../components/ui/ChatBubble';
 import { BlurView } from 'expo-blur';
 import Svg, { Circle } from 'react-native-svg';
 import {
@@ -85,10 +85,6 @@ export default function CameraScreen() {
   const sheetRecorderState = useAudioRecorderState(sheetAudioRecorder);
   const [sheetIsTranscribing, setSheetIsTranscribing] = React.useState(false);
 
-  const askAudioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const askRecorderState = useAudioRecorderState(askAudioRecorder);
-  const [askIsTranscribing, setAskIsTranscribing] = React.useState(false);
-
   return (
     <GestureHandlerRootView style={styles.container}>
       <View style={styles.container}>
@@ -97,18 +93,15 @@ export default function CameraScreen() {
         <StatusCapsule />
         <LeftControls />
         <ScanningOverlay />
-        <HazardSheet
-          audioRecorder={sheetAudioRecorder}
-          recorderState={sheetRecorderState}
-          isTranscribing={sheetIsTranscribing}
-          setIsTranscribing={setSheetIsTranscribing}
-        />
-        <AskAIButton
-          audioRecorder={askAudioRecorder}
-          recorderState={askRecorderState}
-          isTranscribing={askIsTranscribing}
-          setIsTranscribing={setAskIsTranscribing}
-        />
+        <View style={styles.sheetContainer} pointerEvents="box-none">
+          <HazardSheet
+            audioRecorder={sheetAudioRecorder}
+            recorderState={sheetRecorderState}
+            isTranscribing={sheetIsTranscribing}
+            setIsTranscribing={setSheetIsTranscribing}
+          />
+        </View>
+        <ChatBubble />
       </View>
     </GestureHandlerRootView>
   );
@@ -118,6 +111,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  sheetContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 9999,
+    elevation: 9999,
   },
   // Scanning Overlay
   scanningOverlayContainer: {

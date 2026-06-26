@@ -18,7 +18,6 @@ import * as Haptics from 'expo-haptics';
 import {
   RefreshCcw,
   Zap,
-  Sun,
   LayoutGrid,
   ScanLine,
   Mic,
@@ -159,7 +158,7 @@ function ScanBtn() {
 
 // ── Main export ─────────────────────────────────────────────────
 export function LeftControls() {
-  const { facing, toggleFacing, toggleTorch, torchEnabled, workflowState, setVoiceActiveState } = useWorkflowStore();
+  const { facing, toggleFacing, toggleTorch, torchEnabled, workflowState, setVoiceActiveState, setWorkflowState } = useWorkflowStore();
   const insets = useSafeAreaInsets();
 
   // Hide left controls completely when sheet is expanded in details
@@ -201,25 +200,35 @@ export function LeftControls() {
           />
         </GlassBtn>
 
-        {/* ── Sun / Exposure ── */}
-        <GlassBtn onPress={() => {}} size={48}>
-          <Sun color="rgba(255,255,255,0.88)" size={19} strokeWidth={2.2} />
-        </GlassBtn>
+
 
         {/* ── Grid/Layout Toggle ── */}
-        <GlassBtn onPress={() => {}} size={48}>
-          <LayoutGrid color="rgba(255,255,255,0.88)" size={19} strokeWidth={2.2} />
-        </GlassBtn>
+        {workflowState !== 'READY' && workflowState !== 'SCANNING' && (
+          <GlassBtn
+            onPress={() => setWorkflowState(workflowState === 'MODE_SELECTION' ? 'READY' : 'MODE_SELECTION')}
+            size={48}
+            active={workflowState === 'MODE_SELECTION'}
+            tintColor="#10B981"
+          >
+            <LayoutGrid
+              color={workflowState === 'MODE_SELECTION' ? '#10B981' : 'rgba(255,255,255,0.88)'}
+              size={19}
+              strokeWidth={2.2}
+            />
+          </GlassBtn>
+        )}
 
         {/* ── Voice Assistant Trigger ── */}
-        <GlassBtn
-          onPress={triggerVoice}
-          size={48}
-          tintColor="#EF4444"
-          active={workflowState === 'VOICE_ACTIVE'}
-        >
-          <Mic color="rgba(255,255,255,0.88)" size={19} strokeWidth={2.2} />
-        </GlassBtn>
+        {workflowState !== 'READY' && workflowState !== 'SCANNING' && (
+          <GlassBtn
+            onPress={triggerVoice}
+            size={48}
+            tintColor="#EF4444"
+            active={workflowState === 'VOICE_ACTIVE'}
+          >
+            <Mic color="rgba(255,255,255,0.88)" size={19} strokeWidth={2.2} />
+          </GlassBtn>
+        )}
 
         {/* ── Camera Flip ── */}
         <GlassBtn onPress={toggleFacing} size={48}>

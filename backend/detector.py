@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import uuid
 import csv
@@ -21,8 +22,23 @@ class HazardDetector:
 
         self.client = Groq(api_key=groq_key)
         self.llm_model = "llama-3.3-70b-versatile"
+        self.llm_fallback_model = "llama-3.1-8b-instant"  # 500K TPD fallback when 70B hits daily limit
         self.vlm_model = "pixtral-12b-2409"
-        
+        self.groq_vlm_model = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+        # Initialize Mistral SDK client if key is present
+        mistral_key = os.getenv("MISTRAL_API_KEY")
+        if mistral_key:
+            try:
+                from mistralai.client import Mistral
+                self.mistral_client = Mistral(api_key=mistral_key)
+                print("[Detector] Mistral SDK client initialized.")
+            except Exception as mistral_init_err:
+                self.mistral_client = None
+                print(f"[Warning] Mistral SDK init failed: {type(mistral_init_err).__name__}: {mistral_init_err}")
+        else:
+            self.mistral_client = None
+
         # In-memory session state (SRS §16.1)
         self.sessions: dict[str, dict] = {}
         
@@ -307,98 +323,110 @@ Address the user question directly in the 'chat_reply' field (1-3 plain sentence
     # Model Access Helpers
     # ──────────────────────────────────────────────────────────────
     def _call_pixtral_vlm(self, jpeg_b64: str, prompt: str) -> str:
-        """Call Pixtral-12B via Mistral AI API (with Groq vision fallback)."""
-        import urllib.request
-        
-        api_key = os.getenv("MISTRAL_API_KEY")
-        if not api_key:
-            # Fallback to Groq Vision API
-            print("[Warning] MISTRAL_API_KEY not found in environment. Falling back to Groq Vision VLM.")
-            try:
-                response = self.client.chat.completions.create(
-                    model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{jpeg_b64}"}}
-                            ]
-                        }
-                    ],
-                    max_tokens=1024,
-                )
-                return response.choices[0].message.content
-            except Exception as e:
-                print(f"[Detector] Groq VLM fallback failed: {e}")
-                raise EnvironmentError("MISTRAL_API_KEY is missing and Groq VLM fallback failed.")
+        """Call Pixtral-12B via official Mistral AI SDK with retry on 429, and Groq Vision fallback."""
 
-        url = "https://api.mistral.ai/v1/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        data = {
-            "model": self.vlm_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{jpeg_b64}"}}
-                    ]
-                }
-            ],
-            "temperature": 0.2
-        }
-        
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(data).encode("utf-8"),
-            headers=headers,
-            method="POST"
-        )
-        
-        try:
-            with urllib.request.urlopen(req, timeout=30) as response:
-                res_data = response.read().decode("utf-8")
-                res_json = json.loads(res_data)
-                return res_json["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"[Detector] Mistral API call failed: {e}. Attempting dynamic Groq Vision VLM fallback...")
+        # ── No Mistral key or SDK not installed → go straight to Groq Vision ──
+        if not self.mistral_client:
+            print("[Warning] Mistral client unavailable. Using Groq Vision VLM directly.")
+            return self._call_groq_vision(jpeg_b64, prompt)
+
+        # ── Build the message payload ─────────────────────────────────────────
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{jpeg_b64}"}},
+                ],
+            }
+        ]
+
+        # ── Retry loop: up to 3 attempts with exponential backoff on 429 ──────
+        max_attempts = 3
+        backoff_seconds = [2, 4, 8]  # wait times between retries
+
+        for attempt in range(1, max_attempts + 1):
             try:
-                response = self.client.chat.completions.create(
-                    model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{jpeg_b64}"}}
-                            ]
-                        }
-                    ],
+                response = self.mistral_client.chat.complete(
+                    model=self.vlm_model,
+                    messages=messages,
+                    temperature=0.2,
                     max_tokens=1024,
                 )
-                print("[Detector] Groq Vision fallback succeeded.")
+                print(f"[Detector] Mistral Pixtral-12B responded (attempt {attempt}).")
                 return response.choices[0].message.content
-            except Exception as fallback_err:
-                print(f"[Detector] Groq Vision fallback failed as well: {fallback_err}")
-                raise e
+
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "429" in err_str or "rate limit" in err_str or "too many requests" in err_str
+
+                if is_rate_limit and attempt < max_attempts:
+                    wait = backoff_seconds[attempt - 1]
+                    print(f"[Detector] Mistral 429 rate-limit hit (attempt {attempt}/{max_attempts}). "
+                          f"Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+
+                # Non-429 error OR exhausted retries → fall back to Groq Vision
+                if is_rate_limit:
+                    print(f"[Detector] Mistral rate-limit persists after {max_attempts} attempts. "
+                          f"Falling back to Groq Vision VLM...")
+                else:
+                    print(f"[Detector] Mistral API error: {e}. Falling back to Groq Vision VLM...")
+
+                return self._call_groq_vision(jpeg_b64, prompt)
+
+        # Should never reach here, but safety net
+        return self._call_groq_vision(jpeg_b64, prompt)
+
+    def _call_groq_vision(self, jpeg_b64: str, prompt: str) -> str:
+        """Call Groq Vision VLM (llama-4-scout) as primary or fallback vision model."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.groq_vlm_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{jpeg_b64}"}},
+                        ],
+                    }
+                ],
+                max_tokens=1024,
+            )
+            print("[Detector] Groq Vision VLM responded successfully.")
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"[Detector] Groq Vision VLM also failed: {e}")
+            raise RuntimeError(f"Both Mistral and Groq Vision VLM failed. Last error: {e}")
 
     def _call_groq_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """Call Llama 3.3 70B via Groq API."""
-        response = self.client.chat.completions.create(
-            model=self.llm_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            max_tokens=2048
-        )
-        return response.choices[0].message.content
+        """Call Llama 3.3 70B via Groq API, with automatic fallback to 8B on 429 rate limit."""
+        models_to_try = [self.llm_model, self.llm_fallback_model]
+
+        for model in models_to_try:
+            try:
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.2,
+                    max_tokens=2048
+                )
+                if model != self.llm_model:
+                    print(f"[Detector] LLM fallback: using {model} (primary model hit rate limit).")
+                return response.choices[0].message.content
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "429" in str(e) or "rate limit" in err_str or "too many requests" in err_str
+                if is_rate_limit and model != models_to_try[-1]:
+                    print(f"[Detector] {model} hit 429 rate limit. Falling back to {models_to_try[models_to_try.index(model) + 1]}...")
+                    continue
+                raise
 
     def _ensure_jpeg(self, full_frame_b64: str) -> str:
         """Convert raw RGB bytes (320x320x3) to valid JPEG if needed.

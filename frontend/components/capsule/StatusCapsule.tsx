@@ -158,6 +158,24 @@ export function StatusCapsule() {
           </View>
         );
 
+      case 'VOICE_ACTIVE':
+      case 'VOICE_SPEAKING':
+        return (
+          <View style={styles.exploreWrapper}>
+            <Pressable onPress={handleBack} style={styles.roundBtn}>
+              <ChevronLeft color="#fff" size={20} />
+            </Pressable>
+            <View style={styles.capsule}>
+              <Text style={styles.label}>
+                {workflowState === 'VOICE_ACTIVE' ? 'Listening...' : 'Voice Assistant'}
+              </Text>
+            </View>
+            <Pressable onPress={() => {}} style={styles.roundBtn}>
+              <ScanFace color="#fff" size={20} />
+            </Pressable>
+          </View>
+        );
+
       default:
         return (
           <View style={styles.capsule}>
@@ -173,7 +191,10 @@ export function StatusCapsule() {
       style={[
         styles.wrapper,
         { top: Math.max(insets.top, 30) + 12 },
-        (workflowState === 'EXPLORE_LABELS' || workflowState === 'GUIDE_MODE') && { width: '90%', alignSelf: 'center' }
+        (workflowState === 'EXPLORE_LABELS' ||
+         workflowState === 'GUIDE_MODE' ||
+         workflowState === 'VOICE_ACTIVE' ||
+         workflowState === 'VOICE_SPEAKING') && { width: '90%', alignSelf: 'center' }
       ]}
     >
       <BlurView intensity={40} tint="dark" style={styles.blurWrap}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -16,6 +16,20 @@ import * as Speech from 'expo-speech';
 import { useChatStore } from '../../store/chatStore';
 
 const AUTO_DISMISS_MS = 8000;
+
+// ─── VOICE CONFIG ────────────────────────────────────────────────────────────
+// Set a specific voice identifier here to override auto-selection.
+// Leave as null to auto-pick the best English voice for your platform.
+// Run the app and check Expo logs to see all available voice IDs on your device.
+//
+// Android examples:
+//   'en-us-x-tpc-local'          ← Google US English (local)
+//   'en-us-x-sfg#male_1-local'   ← Google US English Male
+//   'en-gb-x-gbb#male_2-local'   ← Google UK English Male
+//   'en-us-x-iom-network'        ← Google US English (network / higher quality)
+//
+const PREFERRED_VOICE_ID: string | null = null;
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * ChatBubble — displays the AI's chat_reply above the bottom sheet.
@@ -36,18 +50,49 @@ export function ChatBubble() {
 
   const visible = useSharedValue(0);
 
+
   // Load the best available voice once on mount
   useEffect(() => {
     async function loadVoices() {
       try {
         const voices = await Speech.getAvailableVoicesAsync();
-        // Find an enhanced quality English voice (Siri/Google premium)
-        const premiumVoice = voices.find(
-          (v: Speech.Voice) => v.language.startsWith('en') && v.quality === Speech.VoiceQuality.Enhanced
-        ) || voices.find((v: Speech.Voice) => v.language.startsWith('en'));
 
-        if (premiumVoice) {
-          setSelectedVoice(premiumVoice.identifier);
+        // Log all voices so you can pick one by identifier
+        console.log('[Speech] Available voices on this device:');
+        voices.forEach((v: Speech.Voice) => {
+          console.log(`  [${v.language}] ${v.identifier}  quality=${v.quality === Speech.VoiceQuality.Enhanced ? 'Enhanced' : 'Default'} name=${v.name}`);
+        });
+
+        // Use hardcoded voice if set, otherwise auto-pick best English
+        if (PREFERRED_VOICE_ID) {
+          const found = voices.find((v: Speech.Voice) => v.identifier === PREFERRED_VOICE_ID);
+          if (found) {
+            console.log('[Speech] Using preferred voice:', found.identifier);
+            setSelectedVoice(found.identifier);
+            return;
+          }
+          console.warn('[Speech] Preferred voice not found, falling back to auto-select.');
+        }
+
+        // Auto-select based on platform
+        let picked: Speech.Voice | undefined;
+
+        if (Platform.OS === 'android') {
+          // Android: prefer Google TTS network (highest quality) → local → any English
+          picked =
+            voices.find((v: Speech.Voice) => v.language.startsWith('en') && v.identifier.includes('network')) ||
+            voices.find((v: Speech.Voice) => v.language.startsWith('en-us') && v.identifier.includes('local')) ||
+            voices.find((v: Speech.Voice) => v.language.startsWith('en'));
+        } else {
+          // iOS: prefer Enhanced (Siri) quality first
+          picked =
+            voices.find((v: Speech.Voice) => v.language.startsWith('en') && v.quality === Speech.VoiceQuality.Enhanced) ||
+            voices.find((v: Speech.Voice) => v.language.startsWith('en'));
+        }
+
+        if (picked) {
+          console.log(`[Speech] Auto-selected voice (${Platform.OS}):`, picked.identifier);
+          setSelectedVoice(picked.identifier);
         }
       } catch (err) {
         console.error('Failed to load speech voices:', err);
@@ -67,11 +112,11 @@ export function ChatBubble() {
         rate: 0.95, // slightly slower for a more natural cadence
       });
 
-       // Auto-dismiss
-       if (dismissTimer.current) clearTimeout(dismissTimer.current);
-       dismissTimer.current = setTimeout(() => {
-         visible.value = withTiming(0, { duration: 400 });
-       }, AUTO_DISMISS_MS);
+      // Auto-dismiss
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
+      dismissTimer.current = setTimeout(() => {
+        visible.value = withTiming(0, { duration: 400 });
+      }, AUTO_DISMISS_MS);
     }
     return () => {
       Speech.stop();
@@ -168,7 +213,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(96,165,250,0.18)',
     padding: 14,
-    zIndex: 150,
+    zIndex: 10000,
+    elevation: 10000,
   },
   typingBubble: {
     paddingVertical: 16,
