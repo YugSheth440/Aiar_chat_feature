@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "fixsight-temp",
+    "slug": "fixsight-temp",
+    "scheme": "fixsight",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "FixSight needs camera access to detect hazards.",
+        "NSMicrophoneUsageDescription": "FixSight needs microphone access to transcribe voice messages into text."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.chirag_jain.fixsighttemp"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "FixSight needs camera access to detect hazards.",
+          "enableFrameProcessors": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "FixSight needs microphone access to transcribe voice messages into text."
+        }
+      ],
+      "react-native-fast-tflite",
+      "expo-sqlite",
+      "expo-router",
+      "expo-asset"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b971f202-a995-4dc9-9646-676b9a836c24"
+      }
+    },
+    "owner": "yugsheth1"
+  }
+}

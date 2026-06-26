@@ -1,0 +1,723 @@
+FixSight SRS v5.0 — Zero-Cost Edge-Hybrid AR Safety MVP
+1. Product Vision
+
+FixSight is a mobile AR assistant that detects a hazard in the camera view, analyzes the surrounding scene for related objects and safer alternatives, and guides the user with live AR overlays and step-by-step instructions.
+
+The product must feel:
+
+modern
+premium
+fast
+intelligent
+smooth in AR
+trustworthy in emergency-like scenarios
+efficient enough to run as a zero-cost MVP
+
+The MVP must prioritize:
+
+live camera AR
+reliable object tracking
+scene understanding
+actionable guidance
+graceful fallback when direct action is not enough
+
+The product should not feel like a simple detector. It should feel like an intelligent visual assistant that marks the hazard, identifies nearby helpful or risky objects, and tells the user what to do next.
+
+2. MVP Goal
+
+Build a shareable demo version of FixSight that works with zero infrastructure cost using:
+
+React Native / Expo
+VisionCamera
+local lightweight TFLite detection on-device
+Skia for AR overlay rendering
+a local or tunneled FastAPI backend
+Groq or another free-tier VLM/LLM provider for semantic reasoning
+zero continuous video upload
+crop-based or keyframe-based analysis only
+
+The MVP must support:
+
+live camera view
+bounding box overlays
+hazard identification
+nearby-object analysis
+contextual guidance
+fallback guidance if the first action is ineffective
+bottom sheet explanation
+premium animations and polished AR presentation
+3. Core Product Principle
+
+The app must split responsibilities correctly:
+
+On-device
+detect and track objects
+stabilize bounding boxes
+render AR overlays
+keep the camera experience smooth
+avoid lag and flicker
+Backend
+analyze cropped keyframes
+infer what the hazard is
+infer what surrounding objects matter
+return structured guidance in JSON
+decide fallback instructions if needed
+UI
+highlight hazards in AR
+show actionable steps in a bottom sheet
+allow user to mark a step as ineffective
+smoothly transition into fallback guidance
+
+This separation is essential. The device handles motion and tracking. The backend handles meaning and reasoning.
+
+4. Scope
+In scope
+real-time camera AR
+local object detection/tracking
+crop/keyframe sending only
+semantic scene analysis
+hazard and mitigation object identification
+spatial AR overlays
+step-by-step guidance UI
+fallback plan behavior
+zero-cost MVP deployment approach
+premium visual styling
+Out of scope for this MVP
+full offline perfect AI reasoning
+production cloud scaling
+app store release
+multi-user back-office dashboards
+long-term analytics platform
+medical, fire-authority, or legally certified emergency guidance
+5. Primary Use Case
+
+A user opens the app and points the camera at a real-world hazard.
+
+Example:
+
+fire near a switchboard
+smoke near electrical equipment
+object blocking a safe exit
+visible hazard with nearby tools or risk multipliers
+
+The app should:
+
+detect the main hazard
+identify nearby context objects
+mark the relevant objects with AR overlays
+show what the user should do
+if the first action is ineffective, show a general fallback plan
+6. Product Behavior Rules
+Rule 1: The camera must stay fluid
+
+The AR overlay should never freeze the preview or block the UI thread.
+
+Rule 2: Tracking must be stable
+
+Bounding boxes must not flicker every frame. The same object must keep its identity across frames when possible.
+
+Rule 3: Send only useful data
+
+Do not stream full raw video continuously to the backend.
+
+Rule 4: Reasoning must be structured
+
+Backend output must be strict JSON. No free-form text for critical state.
+
+Rule 5: Guidance must be actionable
+
+The system must not merely label objects. It must guide the user.
+
+Rule 6: Fallback must exist
+
+If direct mitigation fails or is unsafe, the app must switch to general safety instructions.
+
+7. User Experience Flow
+Step 1: Open camera
+
+User enters the camera screen and sees a live AR view.
+
+Step 2: Local detection begins
+
+The device detects objects and tracks them locally.
+
+Step 3: Stable object is selected
+
+When the detector finds a stable candidate object, the app captures a crop.
+
+Step 4: Crop is sent to backend
+
+The crop is sent through a WebSocket or lightweight HTTP route.
+
+Step 5: Backend performs reasoning
+
+The backend sends the crop to the VLM/LLM pipeline and returns structured scene analysis.
+
+Step 6: AR overlay updates
+
+The app shows:
+
+primary hazard box
+nearby threat-multiplier box
+nearby mitigation-tool box
+connector lines
+step cards in bottom sheet
+Step 7: User follows action
+
+User taps or follows the guidance.
+
+Step 8: Action ineffective flow
+
+If the user taps “Action ineffective” or the situation appears unresolved:
+
+remove current AR focus
+show fallback plan
+switch bottom sheet to emergency/general mitigation mode
+8. System Architecture
+8.1 Mobile App Layer
+
+Built with:
+
+React Native / Expo
+VisionCamera
+Skia
+Reanimated
+Gorhom Bottom Sheet
+Zustand or equivalent state store
+expo-haptics
+
+Responsibilities:
+
+capture camera feed
+run local frame processing
+detect object candidates
+stabilize bounding boxes
+crop keyframes
+draw AR overlays
+display guidance UI
+manage fallback mode
+8.2 Backend Layer
+
+Built with:
+
+FastAPI
+WebSocket support
+Groq SDK or similar free-tier reasoning service
+lightweight in-memory session state for MVP
+optional local tunneling for demo access
+
+Responsibilities:
+
+receive cropped image frames
+call VLM for scene understanding
+optionally call LLM for formatted steps
+return strict structured JSON
+keep session state lightweight
+8.3 AI Reasoning Layer
+
+This layer must do semantic analysis rather than raw detection only.
+
+It should infer:
+
+primary hazard
+risk level
+threat multipliers
+mitigation tools
+safe next action
+fallback plan
+
+Example:
+If the hazard is fire, the system should look for nearby:
+
+switchboard
+power source
+flammable material
+extinguisher
+water source
+exit path
+
+The model does not need perfect legal correctness. It needs usable structured guidance for the MVP.
+
+8.4 High-Performance UI Thread Architecture
+
+To maintain a stable 60 FPS rendering performance and eliminate visual stuttering, FixSight divides data mutations into a three-tier asymmetric pipeline:
+
+- Tracking Core (Native C++ / Frame Processor): Local object boundary discovery, feature tracking, and coordinate spatial computations. Communicates via JavaScript Interface (JSI) shared memory.
+- Visual Layer (UI Thread / Reanimated + Skia): Vector drawing (rings, leader lines, highlights) on top of the camera feed. Updates coordinates via Reanimated SharedValues directly, causing zero React JS thread re-renders.
+- Logic Layer (JS Thread / React + Zustand): State machine execution, application navigation, text rendering in the bottom sheet, and audio/voice operations. Communicates via asynchronous batched microtasks.
+
+9. Local Tracking Strategy
+
+The app must not depend on the backend for frame-by-frame tracking.
+
+Use a hybrid local tracking strategy:
+
+lightweight detector on-device
+centroid or IoU-based tracking
+stable IDs for objects
+debounce before sending crop
+send only the selected crop
+Tracking behavior
+
+An object is considered stable if:
+
+it remains in roughly the same location for a configurable number of frames
+its box dimensions do not jump too much
+confidence stays above a threshold
+Stability threshold
+
+Suggested MVP default:
+
+20 to 30 frames stability window
+or around 1 second of persistence
+Why this matters
+
+This prevents:
+
+flicker
+duplicate detections
+repeated API calls
+unstable overlays
+
+9.1 Mathematical Framework for Spatial Coordination
+
+To project bounding boxes and anchoring targets from physical assets onto the 2D mobile screen viewport, the rendering engine runs a continuous Coordinate Transformation Pipeline. Coordinates of the components are scaled from normalized ratios [x_norm, y_norm] to screen viewport dimensions (W_viewport, H_viewport):
+
+  u = x_norm * W_viewport
+  v = y_norm * H_viewport
+
+Rings and labels are drawn at (u, v) on the full-screen canvas.
+
+9.2 Proximity-Driven Label Progression
+
+The system measures the screen-space Euclidean distance d between the center of the mobile screen viewport (W_viewport/2, H_viewport/2) and the component anchor point (u, v):
+
+  d = sqrt( (W_viewport/2 - u)^2 + (H_viewport/2 - v)^2 )
+
+To animate label visibility transitions smoothly without manual tapping, distance d feeds into an inverse smoothstep interpolation clamped between an inner visibility radius (r_in) and an outer activation boundary (r_out):
+
+  t = clamp( (d - r_in) / (r_out - r_in), 0, 1 )
+  Opacity(d) = 1 - (3*t^2 - 2*t^3)
+
+10. AR Reasoning Model Behavior
+
+The model should not only say “fire detected.”
+
+It should return:
+
+what the fire is
+what nearby object is important
+why it matters
+what the user should do
+what to do if that action fails
+Example reasoning behavior
+
+If a fire is near an electrical switchboard:
+
+primary hazard: fire
+threat multiplier: switchboard
+mitigation tool: fire extinguisher or water source only if safe
+action: cut power if possible
+fallback: evacuate immediately if the fire spreads
+
+The AR UI should visually reflect this reasoning.
+
+11. Strict Data Contracts
+11.1 Client to Server payload
+
+Sent when a stable crop is ready.
+
+{
+  "event": "keyframe_crop_ready",
+  "session_id": "demo_session_1",
+  "crop_b64": "base64_encoded_jpeg_string",
+  "original_bbox": [0.25, 0.30, 0.50, 0.60],
+  "device_context": {
+    "lighting": "normal",
+    "motion": "low",
+    "device_mode": "live_camera"
+  }
+}
+Required fields
+event
+session_id
+crop_b64
+original_bbox
+Optional fields
+device_context
+confidence
+timestamp
+11.2 Server to Client payload
+
+Returned after scene analysis.
+
+{
+  "event": "scene_analysis_complete",
+  "primary_hazard": "Electrical Fire",
+  "risk_level": "CRITICAL",
+  "summary": "Fire near electrical area may worsen if power remains on.",
+  "spatial_targets": [
+    {
+      "id": "tgt_0",
+      "label": "Main Switchboard",
+      "type": "threat_multiplier",
+      "box_2d": [0.10, 0.20, 0.35, 0.45],
+      "guidance": "Cut power immediately if it is safe to do so."
+    },
+    {
+      "id": "tgt_1",
+      "label": "Fire Extinguisher",
+      "type": "mitigation_tool",
+      "box_2d": [0.75, 0.40, 0.90, 0.65],
+      "guidance": "Use only if trained and the fire is still small and controllable."
+    }
+  ],
+  "fallback_plan": "If the fire grows or the area becomes unsafe, evacuate immediately and alert nearby people.",
+  "confidence": 0.86
+}
+Required behavior
+JSON only
+no markdown
+no explanation outside schema
+no extra keys unless explicitly allowed
+12. Frontend UI Requirements
+12.1 Camera Screen
+
+The camera screen must feel premium and minimal.
+
+It should include:
+
+full-screen camera preview
+unobtrusive top status bar
+smooth AR overlay layer
+compact capture/state indicators
+subtle gradient or glass effect
+no clutter
+12.2 AR Overlay
+
+Use Skia to render:
+
+primary hazard box
+threat multiplier box
+mitigation tool box
+connector lines between related items
+soft pulsing effects only on danger items
+calmer visual treatment on safe items
+Visual language
+primary hazard: red / crimson
+threat multiplier: red / orange
+mitigation tool: green
+fallback state: high-contrast neutral or warning mode
+Overlay behavior
+boxes should animate in smoothly
+avoid harsh pop-in
+maintain spatial alignment with the tracked object
+do not re-render unnecessarily
+12.3 Bottom Sheet
+
+Use Gorhom Bottom Sheet for explanations and actions.
+
+It must show:
+
+primary hazard title
+concise reasoning summary
+step cards
+action buttons
+“Action ineffective” button
+fallback plan if needed
+Bottom sheet states
+hidden or collapsed
+hazard summary
+action guidance
+fallback mode
+Fallback mode behavior
+
+When action is ineffective:
+
+clear current guidance cards
+show fallback plan
+increase visual urgency
+trigger haptics
+optionally dim or darken the UI slightly
+13. Interaction Design Rules
+Hazard detected
+show red AR box
+show hazard title
+show first action step
+Helpful object detected
+show green AR box
+show “use this” style guidance
+Dangerous object detected
+show warning box
+show “avoid / disconnect / move away” instruction
+User taps action ineffective
+switch to fallback plan
+do not keep repeating the same instruction
+clear or de-emphasize resolved boxes
+14. Performance Requirements
+Camera experience
+near real-time preview
+no UI blocking
+smooth animation under moderate device load
+Tracking
+local detector must be lightweight
+avoid full video upload
+reduce repeated inference calls
+Backend
+process only crops/keyframes
+keep responses concise
+minimize latency
+Rendering
+AR overlay must remain responsive
+avoid heavy CPU work on main thread
+use native animations and worklets when possible
+
+14.1 API Call Throttling and Frequency Limits
+
+To support zero-infrastructure and zero-cost scaling, API calls to the VLM/LLM backend must be minimized:
+
+- Active Camera & Tracking State: 0 API calls per second. All real-time bounding box renders, tracking adjustments, and smoothing are done completely locally on-device.
+- Event-Driven Requests: Calls are triggered only on explicit interactions:
+  * Camera Scan: 1 HTTP call to '/identify-device'.
+  * Mode Select: 1 HTTP call to '/mode/explain', '/mode/guide', or '/mode/troubleshoot'.
+  * Voice Assistant: 1 HTTP call to '/transcribe' and 1 HTTP call to '/chat'.
+- Continuous Discovery: If automatically checking components, the device applies a 20-30 frame stability window (~1s of persistence) and debounces API requests. Discovery calls are capped at a maximum of one request every 3-5 seconds to prevent rate-limiting.
+
+15. Reliability Rules
+Must handle
+no detection found
+low confidence detection
+backend timeout
+invalid JSON from model
+object disappears from frame
+user moves camera quickly
+repeated same object submissions
+Fallback behavior
+
+If backend fails:
+
+keep camera running
+preserve local tracking if possible
+show a safe generic UI message
+avoid app crash
+allow retry
+16. Suggested File-Level Change Plan
+
+Below is the implementation plan the AI agent should follow.
+
+16.1 Backend changes
+main.py
+
+Update websocket endpoint so it:
+
+receives crop events rather than continuous full video stream
+parses strict JSON
+calls reasoning pipeline
+returns structured scene analysis JSON
+handles timeout and invalid response safely
+detector.py
+
+Refactor into a clean reasoning service wrapper:
+
+remove old tight coupling to one model
+allow provider switching through environment variables
+accept base64 image crop input
+accept prompt templates
+return normalized JSON only
+prompt files
+
+Create dedicated prompt templates for:
+
+hazard identification
+relational scene understanding
+fallback plan generation
+strict JSON enforcement
+state storage
+
+Use lightweight in-memory state for MVP:
+
+session_id
+last crop timestamp
+last hazard
+last analyzed object
+last fallback state
+
+Do not use CSV logs for core runtime state.
+
+16.2 Mobile app changes
+CameraView.tsx
+
+Implement:
+
+VisionCamera frame processor
+local object detection
+box stabilization
+crop extraction logic
+crop sending trigger
+debounce logic
+confidence threshold logic
+AROverlay.tsx
+
+Implement:
+
+Skia drawing for all boxes
+color mapping by object type
+connectors between hazard and contextual targets
+smooth entry/exit transitions
+pulse animation for critical hazard
+sceneStore.ts
+
+Extend store to handle:
+
+primary_hazard
+risk_level
+spatial_targets
+fallback_plan
+current action step
+ineffective action state
+session state
+bottom sheet component
+
+Implement:
+
+hazard summary
+step list
+action buttons
+ineffective action button
+fallback plan mode
+haptics
+
+Trigger:
+
+on critical hazard detection
+on step completion
+on fallback activation
+17. Object Type Rules
+primary_hazard
+
+The main dangerous thing being analyzed.
+
+threat_multiplier
+
+Anything that can worsen the hazard:
+
+power source
+flammable object
+gas source
+heat source
+chemical source
+blocked escape route
+mitigation_tool
+
+Anything that can help reduce the hazard:
+
+extinguisher
+water source if safe
+emergency switch
+safe exit
+protective equipment
+alarm pull station
+neutral_context
+
+Objects that are present but not directly relevant.
+
+18. Fallback Logic
+
+The fallback plan is not just a backup message. It is a real UI state.
+
+Fallback mode triggers when:
+
+user taps “Action ineffective”
+model confidence is too low
+initial mitigation appears unsuccessful
+hazard severity increases
+detection is unstable for too long
+
+Fallback mode behavior:
+
+remove detailed object-specific guidance
+show generic safety instructions
+elevate urgency
+encourage evacuation or safe distance when needed
+continue tracking only if useful
+19. Prompt Contract for the AI Agent
+
+Use this exact instruction style in the coding agent:
+
+Build objective
+
+Implement a mobile AR hazard guidance system that uses local tracking for live overlays and backend vision reasoning for semantic guidance.
+
+Must-do
+keep camera smooth
+remove continuous video streaming
+use crop/keyframe analysis only
+keep AR overlays on-device
+return strict JSON from backend
+support hazard + context + mitigation + fallback
+preserve premium UI behavior
+Must not
+block UI thread
+depend on cloud streaming for every frame
+rely on CSV for runtime state
+allow inconsistent JSON
+hardcode provider keys
+break camera performance
+20. Acceptance Criteria
+
+The MVP is considered successful when all of the following are true:
+
+camera opens smoothly
+local detection runs without freezing UI
+stable hazard can be boxed in AR
+crop is sent only after stability
+backend returns structured scene analysis
+primary hazard, threat multiplier, and mitigation tool can be shown together
+bottom sheet shows clear action steps
+“Action ineffective” switches to fallback mode
+UI remains premium and responsive
+zero-cost demo can be shared through local tunnel/exposed demo link
+app is usable as a convincing MVP demo
+21. Definition of Done
+
+The MVP is done when:
+
+AR boxes are stable
+reasoning JSON is consistent
+app responds quickly
+fallback flow works
+visuals feel premium
+demo can be shown to users without paid infrastructure
+22. Recommended Development Phases
+Phase 1: Architecture cleanup
+remove continuous streaming
+refactor backend routing
+standardize JSON contracts
+Phase 2: Local tracking
+add on-device detection
+stabilize boxes
+capture crops
+Phase 3: Scene reasoning
+wire backend to VLM/LLM
+return relational scene graph
+Phase 4: AR UI
+implement Skia overlays
+connect bottom sheet
+add step cards and fallback mode
+Phase 5: Demo polish
+animations
+haptics
+transitions
+error handling
+premium visual refinement
+23. Final Implementation Summary
+
+FixSight MVP should behave like this:
+
+The phone detects and tracks the world locally.
+The backend interprets the situation semantically.
+The app overlays the result in real time.
+The user gets clear guidance.
+If the first action fails, the app immediately gives a safer fallback.
+
+That is the correct modern architecture for a zero-cost, premium-feeling AR safety assistant.

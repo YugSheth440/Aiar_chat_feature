@@ -1,0 +1,28 @@
+# Environment Files
+.env
+.env*.local
+.env.local
+
+# Python / Virtual Environments
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large Machine Learning Models (YOLO Weights)
+*.pt
+
+# Local Telemetry CSV Logs & Databases
+*.csv
+!backend/hazards.csv # Keep predefined configuration hazards list if tracked, otherwise ignore all generated logs
+
+# Editor & System Files
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
